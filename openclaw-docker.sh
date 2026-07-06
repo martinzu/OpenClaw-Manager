@@ -329,13 +329,18 @@ ensure_oc_dirs() {
 }
 
 # 在容器内执行 openclaw 命令 (非交互)
+# cli 服务带 profiles 不会常驻运行, 使用 run --rm 启动临时容器执行
 oc_exec() {
     if [ ! -f "$COMPOSE_FILE" ]; then
         echo -e "${gl_hong}未找到 docker-compose.yml，请先运行选项3 安装向导${gl_bai}"
         return 1
     fi
+    if ! oc_container_running; then
+        echo -e "${gl_hong}网关容器未运行，请先启动容器${gl_bai}"
+        return 1
+    fi
     cd "$OC_HOME" || return 1
-    docker compose -f "$COMPOSE_FILE" exec -T cli openclaw "$@"
+    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" run --rm -T cli openclaw "$@"
 }
 
 # 在容器内执行 openclaw 命令 (交互式，带 TTY)
@@ -344,8 +349,12 @@ oc_exec_it() {
         echo -e "${gl_hong}未找到 docker-compose.yml，请先运行选项3 安装向导${gl_bai}"
         return 1
     fi
+    if ! oc_container_running; then
+        echo -e "${gl_hong}网关容器未运行，请先启动容器${gl_bai}"
+        return 1
+    fi
     cd "$OC_HOME" || return 1
-    docker compose -f "$COMPOSE_FILE" exec cli openclaw "$@"
+    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" run --rm cli openclaw "$@"
 }
 
 # 在容器内执行任意命令 (非交互)
@@ -355,7 +364,7 @@ oc_run() {
         return 1
     fi
     cd "$OC_HOME" || return 1
-    docker compose -f "$COMPOSE_FILE" run --rm -T cli "$@"
+    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" run --rm -T cli "$@"
 }
 
 # 获取 openclaw 配置文件路径 (宿主机路径)
@@ -1340,7 +1349,6 @@ ${gateway_volumes}
     image: \${OPENCLAW_IMAGE:-${OC_IMAGE_NAME}}
     container_name: ${OC_CLI_CONTAINER}
     network_mode: "service:gateway"
-    profiles: ["cli"]
     entrypoint: ["openclaw"]
     stdin_open: true
     tty: true
@@ -1591,7 +1599,7 @@ full_install_wizard() {
     echo -e "  ${gl_huang}② 命令行直接操作容器${gl_bai}"
     echo "     docker compose -f $COMPOSE_FILE logs -f gateway     # 查看实时日志"
     echo "     docker compose -f $COMPOSE_FILE restart gateway     # 重启"
-    echo "     docker compose -f $COMPOSE_FILE exec cli openclaw help  # 查看 openclaw 命令帮助"
+    echo "     docker compose -f $COMPOSE_FILE run --rm cli help    # 查看 openclaw 命令帮助"
     echo ""
     echo -e "  ${gl_huang}③ WebUI (可选)${gl_bai}"
     echo -e "     ${gl_hui}仅当你在本机或通过 SSH 隧道访问时使用, 远程服务器无需配置 nginx 反代${gl_bai}"
@@ -1606,7 +1614,7 @@ full_install_wizard() {
 
 # ============================================================================
 #  选项 4: OpenClaw 容器管理 (全量搬运 kejilion.sh moltbot_menu)
-#  适配: openclaw xxx → docker compose exec cli openclaw xxx
+#  适配: openclaw xxx → docker compose run --rm cli openclaw xxx (cli 为临时任务容器)
 #        ${HOME}/.openclaw/openclaw.json → $OC_CONFIG_DIR/openclaw.json (宿主机直接读写)
 # ============================================================================
 
