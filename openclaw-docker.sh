@@ -329,7 +329,7 @@ ensure_oc_dirs() {
 }
 
 # 在容器内执行 openclaw 命令 (非交互)
-# cli 服务带 profiles 不会常驻运行, 使用 run --rm 启动临时容器执行
+# cli 服务配置了 entrypoint: ["openclaw"], 故 run 时直接传子命令参数即可
 oc_exec() {
     if [ ! -f "$COMPOSE_FILE" ]; then
         echo -e "${gl_hong}未找到 docker-compose.yml，请先运行选项3 安装向导${gl_bai}"
@@ -340,7 +340,7 @@ oc_exec() {
         return 1
     fi
     cd "$OC_HOME" || return 1
-    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" run --rm -T cli openclaw "$@"
+    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" run --rm -T cli "$@"
 }
 
 # 在容器内执行 openclaw 命令 (交互式，带 TTY)
@@ -354,17 +354,17 @@ oc_exec_it() {
         return 1
     fi
     cd "$OC_HOME" || return 1
-    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" run --rm cli openclaw "$@"
+    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" run --rm cli "$@"
 }
 
-# 在容器内执行任意命令 (非交互)
+# 在容器内执行任意命令 (非交互, 不经过 entrypoint)
 oc_run() {
     if [ ! -f "$COMPOSE_FILE" ]; then
         echo -e "${gl_hong}未找到 docker-compose.yml，请先运行选项3 安装向导${gl_bai}"
         return 1
     fi
     cd "$OC_HOME" || return 1
-    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" run --rm -T cli "$@"
+    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" run --rm --entrypoint "" -T cli "$@"
 }
 
 # 获取 openclaw 配置文件路径 (宿主机路径)
