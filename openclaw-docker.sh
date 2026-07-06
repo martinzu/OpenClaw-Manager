@@ -1185,6 +1185,25 @@ run_onboarding() {
     # 运行 onboard (交互式)
     docker compose -f "$COMPOSE_FILE" exec "$OC_CONTAINER" \
         node /usr/local/lib/node_modules/openclaw/openclaw.mjs onboard --mode local --no-install-daemon
+
+    # onboard 完成后必须重启网关, 否则 channel 配置(飞书/Telegram等)不会生效
+    echo ""
+    echo -e "${gl_huang}========================================${gl_bai}"
+    echo -e "${gl_huang}配置已写入, 需要重启容器才能让 channel 生效${gl_bai}"
+    echo -e "${gl_huang}========================================${gl_bai}"
+    read -e -p "是否立即重启 OpenClaw 容器? (Y/n): " restart_after_onboard
+    if [[ ! "$restart_after_onboard" =~ ^[Nn] ]]; then
+        echo -e "${gl_kjlan}正在重启容器...${gl_bai}"
+        docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" restart "$OC_CONTAINER"
+        echo -e "${gl_lv}容器已重启${gl_bai}"
+        echo -e "${gl_kjlan}等待 5 秒后显示最近日志...${gl_bai}"
+        sleep 5
+        echo ""
+        echo -e "${gl_kjlan}=== 最近 30 行日志 ===${gl_bai}"
+        docker compose -f "$COMPOSE_FILE" logs --tail=30 "$OC_CONTAINER"
+        echo ""
+        echo -e "${gl_huang}如需查看实时日志: docker compose -f $COMPOSE_FILE logs -f $OC_CONTAINER${gl_bai}"
+    fi
     break_end
 }
 
@@ -2328,8 +2347,23 @@ change_tg_bot_code() {
             ;;
         3) oc_exec_it channels login ;;
         4)
-            echo "飞书插件请先在插件管理中安装 feishu 插件"
-            echo "然后参考 https://docs.openclaw.ai/channels/feishu 配置"
+            echo -e "${gl_kjlan}启动飞书 channel 配置向导...${gl_bai}"
+            echo -e "${gl_huang}向导将引导你扫码或手动输入 App ID/Secret${gl_bai}"
+            echo -e "${gl_huang}配置完成后会自动询问是否重启容器${gl_bai}"
+            echo ""
+            oc_exec_it channels login --channel feishu
+            # channel 配置完成后必须重启才能生效
+            if oc_container_running; then
+                echo ""
+                read -e -p "飞书配置已完成, 是否立即重启容器让配置生效? (Y/n): " restart_feishu
+                if [[ ! "$restart_feishu" =~ ^[Nn] ]]; then
+                    cd "$OC_HOME" && docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" restart "$OC_CONTAINER"
+                    echo -e "${gl_lv}容器已重启, 飞书 channel 即将生效${gl_bai}"
+                    echo -e "${gl_kjlan}5 秒后显示最近日志:${gl_bai}"
+                    sleep 5
+                    docker compose -f "$COMPOSE_FILE" logs --tail=30 "$OC_CONTAINER"
+                fi
+            fi
             ;;
         0) return 0 ;;
     esac
