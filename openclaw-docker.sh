@@ -222,7 +222,7 @@ start_gateway() {
         echo -e "${gl_hong}未找到 docker-compose.yml${gl_bai}"
         return 1
     fi
-    docker compose -f "$COMPOSE_FILE" up -d openclaw-gateway
+    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d "$OC_CONTAINER"
     sleep 3
 }
 
@@ -989,13 +989,16 @@ check_prerequisites() {
         echo -e "${gl_lv}✓ 内存充足: ${mem_total}MB${gl_bai}"
     fi
 
-    # 磁盘空间
-    local disk_free
-    disk_free=$(df -m "$OC_HOME" 2>/dev/null | awk 'NR==2{print $4}')
+    # 磁盘空间(目录不存在时 df 会失败, 逐级回退到父目录直到根)
+    local disk_free df_target="$OC_HOME"
+    while [ ! -d "$df_target" ] && [ "$df_target" != "/" ]; do
+        df_target=$(dirname "$df_target")
+    done
+    disk_free=$(df -m "$df_target" 2>/dev/null | awk 'NR==2{print $4}')
     if [ -n "$disk_free" ] && [ "$disk_free" -lt 2048 ]; then
         echo -e "${gl_huang}⚠ 磁盘空间不足 ${disk_free}MB (建议 ≥2GB)${gl_bai}"
     else
-        echo -e "${gl_lv}✓ 磁盘空间充足: ${disk_free}MB${gl_bai}"
+        echo -e "${gl_lv}✓ 磁盘空间充足: ${disk_free:-?}MB${gl_bai}"
     fi
 
     # 镜像检查
@@ -1018,6 +1021,9 @@ check_prerequisites() {
 # 生成 .env 文件
 generate_env_file() {
     echo -e "${gl_kjlan}=== 生成 .env 配置 ===${gl_bai}"
+
+    # 确保目录存在(generate_compose_file 里也有 chown, 这里先 mkdir 保证可写)
+    mkdir -p "$OC_HOME" "$OC_CONFIG_DIR" "$OC_WORKSPACE_DIR" "$OC_AUTH_DIR" "$OC_DATA_DIR"
 
     # 生成随机 token
     local gateway_token
@@ -1076,11 +1082,38 @@ generate_compose_file() {
     # 确保目录权限 (uid 1000 = node 用户)
     chown -R 1000:1000 "$OC_CONFIG_DIR" "$OC_WORKSPACE_DIR" "$OC_AUTH_DIR" "$OC_DATA_DIR" 2>/dev/null || true
 
-    local home_volume_block=""
+    # 预先生成 volumes 片段(根据是否使用命名卷)
+    local gateway_volumes cli_volumes top_volumes
     if [ -n "$OC_HOME_VOLUME" ]; then
-        home_volume_block="  ${OC_HOME_VOLUME}:
-    external: true
+        # 使用命名卷: 必须先 docker volume create, 顶层 volumes 声明 external:false 让 compose 自动创建
+        docker volume create "$OC_HOME_VOLUME" >/dev/null 2>&1 || true
+        gateway_volumes="    volumes:
+      - \${OPENCLAW_CONFIG_DIR:-${OC_CONFIG_DIR}}:/home/node/.openclaw
+      - \${OPENCLAW_WORKSPACE_DIR:-${OC_WORKSPACE_DIR}}:/home/node/.openclaw/workspace
+      - \${OPENCLAW_AUTH_PROFILE_SECRET_DIR:-${OC_AUTH_DIR}}:/home/node/.config/openclaw
+      - ${OC_HOME_VOLUME}:/home/node"
+        cli_volumes="    volumes:
+      - \${OPENCLAW_CONFIG_DIR:-${OC_CONFIG_DIR}}:/home/node/.openclaw
+      - \${OPENCLAW_WORKSPACE_DIR:-${OC_WORKSPACE_DIR}}:/home/node/.openclaw/workspace
+      - \${OPENCLAW_AUTH_PROFILE_SECRET_DIR:-${OC_AUTH_DIR}}:/home/node/.config/openclaw
+      - ${OC_HOME_VOLUME}:/home/node"
+        top_volumes="
+volumes:
+  ${OC_HOME_VOLUME}:
+    external: false
 "
+    else
+        # bind mount
+        gateway_volumes="    volumes:
+      - \${OPENCLAW_CONFIG_DIR:-${OC_CONFIG_DIR}}:/home/node/.openclaw
+      - \${OPENCLAW_WORKSPACE_DIR:-${OC_WORKSPACE_DIR}}:/home/node/.openclaw/workspace
+      - \${OPENCLAW_AUTH_PROFILE_SECRET_DIR:-${OC_AUTH_DIR}}:/home/node/.config/openclaw
+      - ${OC_DATA_DIR}:/home/node/.openclaw/data"
+        cli_volumes="    volumes:
+      - \${OPENCLAW_CONFIG_DIR:-${OC_CONFIG_DIR}}:/home/node/.openclaw
+      - \${OPENCLAW_WORKSPACE_DIR:-${OC_WORKSPACE_DIR}}:/home/node/.openclaw/workspace
+      - \${OPENCLAW_AUTH_PROFILE_SECRET_DIR:-${OC_AUTH_DIR}}:/home/node/.config/openclaw"
+        top_volumes=""
     fi
 
     cat > "$COMPOSE_FILE" <<EOF
@@ -1102,19 +1135,7 @@ services:
       - OPENCLAW_GATEWAY_TOKEN=\${OPENCLAW_GATEWAY_TOKEN}
       - OPENCLAW_GATEWAY_BIND=\${OPENCLAW_GATEWAY_BIND:-${OC_GATEWAY_BIND}}
       - OPENCLAW_DISABLE_BONJOUR=\${OPENCLAW_DISABLE_BONJOUR:-1}
-$(if [ -n "$OC_HOME_VOLUME" ]; then
-    echo "    volumes:"
-    echo "      - \${OPENCLAW_CONFIG_DIR:-${OC_CONFIG_DIR}}:/home/node/.openclaw"
-    echo "      - \${OPENCLAW_WORKSPACE_DIR:-${OC_WORKSPACE_DIR}}:/home/node/.openclaw/workspace"
-    echo "      - \${OPENCLAW_AUTH_PROFILE_SECRET_DIR:-${OC_AUTH_DIR}}:/home/node/.config/openclaw"
-    echo "      - ${OC_HOME_VOLUME}:/home/node"
-else
-    echo "    volumes:"
-    echo "      - \${OPENCLAW_CONFIG_DIR:-${OC_CONFIG_DIR}}:/home/node/.openclaw"
-    echo "      - \${OPENCLAW_WORKSPACE_DIR:-${OC_WORKSPACE_DIR}}:/home/node/.openclaw/workspace"
-    echo "      - \${OPENCLAW_AUTH_PROFILE_SECRET_DIR:-${OC_AUTH_DIR}}:/home/node/.config/openclaw"
-    echo "      - ${OC_DATA_DIR}:/home/node/.openclaw/data"
-fi)
+${gateway_volumes}
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:18789/healthz"]
       interval: 30s
@@ -1132,20 +1153,13 @@ fi)
     container_name: ${OC_CLI_CONTAINER}
     network_mode: "service:${OC_CONTAINER}"
     profiles: ["cli"]
-    volumes:
-      - \${OPENCLAW_CONFIG_DIR:-${OC_CONFIG_DIR}}:/home/node/.openclaw
-      - \${OPENCLAW_WORKSPACE_DIR:-${OC_WORKSPACE_DIR}}:/home/node/.openclaw/workspace
-      - \${OPENCLAW_AUTH_PROFILE_SECRET_DIR:-${OC_AUTH_DIR}}:/home/node/.config/openclaw
-$(if [ -n "$OC_HOME_VOLUME" ]; then
-    echo "      - ${OC_HOME_VOLUME}:/home/node"
-fi)
+${cli_volumes}
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - NET_RAW
       - NET_ADMIN
-
-${home_volume_block}
+${top_volumes}
 EOF
 
     echo -e "${gl_lv}已生成: $COMPOSE_FILE${gl_bai}"
@@ -1165,11 +1179,11 @@ run_onboarding() {
     echo ""
 
     # 先确保网关容器存在
-    docker compose -f "$COMPOSE_FILE" up -d openclaw-gateway
+    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d "$OC_CONTAINER"
     sleep 3
 
     # 运行 onboard (交互式)
-    docker compose -f "$COMPOSE_FILE" exec openclaw-gateway \
+    docker compose -f "$COMPOSE_FILE" exec "$OC_CONTAINER" \
         node /usr/local/lib/node_modules/openclaw/openclaw.mjs onboard --mode local --no-install-daemon
     break_end
 }
@@ -1245,10 +1259,20 @@ full_install_wizard() {
     generate_compose_file
     echo ""
 
-    # 3. 启动容器
-    echo -e "${gl_kjlan}=== 启动 OpenClaw 容器 ===${gl_bai}"
+    # 3. 验证并启动容器
+    echo -e "${gl_kjlan}=== 验证 compose 配置 ===${gl_bai}"
     cd "$OC_HOME" || return 1
-    if docker compose -f "$COMPOSE_FILE" up -d openclaw-gateway; then
+    if ! docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" config >/dev/null; then
+        echo -e "${gl_hong}compose 配置验证失败，请检查生成的文件${gl_bai}"
+        echo -e "${gl_huang}查看详情: cat $COMPOSE_FILE && cat $ENV_FILE${gl_bai}"
+        break_end
+        return 1
+    fi
+    echo -e "${gl_lv}✓ compose 配置验证通过${gl_bai}"
+    echo ""
+
+    echo -e "${gl_kjlan}=== 启动 OpenClaw 容器 ===${gl_bai}"
+    if docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d "$OC_CONTAINER"; then
         echo -e "${gl_lv}容器已启动${gl_bai}"
         sleep 5
     else
