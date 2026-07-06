@@ -1454,20 +1454,20 @@ show_access_info() {
 
     echo ""
     echo -e "${gl_kjlan}健康检查:${gl_bai}"
-    if command_exists curl; then
-        local healthz http_code
-        http_code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${port}/healthz" 2>/dev/null)
-        if [ "$http_code" = "200" ]; then
+    if oc_container_running; then
+        local healthz_status readyz_status
+        if docker exec "$OC_CONTAINER" curl -fsS http://127.0.0.1:18789/healthz >/dev/null 2>&1; then
             echo -e "  ${gl_lv}✓ /healthz 正常 (HTTP 200)${gl_bai}"
         else
-            echo -e "  ${gl_hong}✗ /healthz 异常 (HTTP ${http_code:-000})${gl_bai}"
+            echo -e "  ${gl_hong}✗ /healthz 异常${gl_bai}"
         fi
-        http_code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${port}/readyz" 2>/dev/null)
-        if [ "$http_code" = "200" ]; then
+        if docker exec "$OC_CONTAINER" curl -fsS http://127.0.0.1:18789/readyz >/dev/null 2>&1; then
             echo -e "  ${gl_lv}✓ /readyz 正常 (HTTP 200)${gl_bai}"
         else
-            echo -e "  ${gl_huang}⚠ /readyz 异常 (HTTP ${http_code:-000})${gl_bai}"
+            echo -e "  ${gl_huang}⚠ /readyz 异常${gl_bai}"
         fi
+    else
+        echo -e "  ${gl_huang}⚠ 容器未运行, 跳过健康检查${gl_bai}"
     fi
 }
 
@@ -1489,16 +1489,48 @@ full_install_wizard() {
 
     echo ""
 
-    # 端口冲突检测
+    # 端口冲突检测 & 自动分配
     local default_port="${OC_GATEWAY_PORT:-18789}"
-    if ss -tlnp 2>/dev/null | grep -q ":${default_port} " || netstat -tlnp 2>/dev/null | grep -q ":${default_port} "; then
-        echo -e "${gl_huang}⚠ 端口 ${default_port} 已被占用${gl_bai}"
-        read -e -p "请输入新的网关端口 (直接回车退出): " alt_port
-        if [ -z "$alt_port" ]; then
-            echo -e "${gl_hong}安装中止${gl_bai}"
-            break_end; return 1
+
+    # 收集所有已使用的端口 (已部署实例 + 当前系统监听)
+    local used_ports=""
+    local inst_dir
+    for inst_dir in "$OC_BASE_DIR"/*/; do
+        [ -f "$inst_dir/.env" ] || continue
+        local inst_port
+        inst_port=$(grep '^OPENCLAW_GATEWAY_PORT=' "$inst_dir/.env" 2>/dev/null | cut -d'=' -f2)
+        [ -n "$inst_port" ] && used_ports="$used_ports $inst_port"
+    done
+    if command_exists ss; then
+        used_ports="$used_ports $(ss -tlnH 2>/dev/null | awk '{print $4}' | grep -oE ':[0-9]+$' | tr -d ':' | sort -u)"
+    elif command_exists netstat; then
+        used_ports="$used_ports $(netstat -tln 2>/dev/null | tail -n+3 | awk '{print $4}' | grep -oE ':[0-9]+$' | tr -d ':' | sort -u)"
+    fi
+
+    # 从 default_port 开始, 找一个未被使用的端口
+    local suggested_port="$default_port"
+    local p="$default_port"
+    while [ $p -lt $((default_port + 100)) ]; do
+        local port_taken=false
+        for up in $used_ports; do
+            [ "$up" = "$p" ] && { port_taken=true; break; }
+        done
+        if [ "$port_taken" = false ]; then
+            suggested_port="$p"
+            break
         fi
+        p=$((p + 1))
+    done
+
+    if [ "$suggested_port" != "$default_port" ]; then
+        echo -e "${gl_huang}⚠ 端口 ${default_port} 已被占用, 自动分配端口 ${suggested_port}${gl_bai}"
+    fi
+
+    read -e -p "网关端口 (回车使用 $suggested_port): " alt_port
+    if [ -n "$alt_port" ]; then
         OC_GATEWAY_PORT="$alt_port"
+    else
+        OC_GATEWAY_PORT="$suggested_port"
     fi
 
     # 是否使用命名卷持久化 /home/node
@@ -1548,12 +1580,9 @@ full_install_wizard() {
 
     # 4. 健康检查
     echo -e "${gl_kjlan}=== 健康检查 ===${gl_bai}"
-    local port="${OC_GATEWAY_PORT:-18789}"
     local retry=0
     while [ $retry -lt 10 ]; do
-        local http_code
-        http_code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${port}/healthz" 2>/dev/null)
-        if [ "$http_code" = "200" ]; then
+        if docker exec "$OC_CONTAINER" curl -fsS http://127.0.0.1:18789/healthz >/dev/null 2>&1; then
             echo -e "${gl_lv}✓ 网关健康检查通过${gl_bai}"
             break
         fi
