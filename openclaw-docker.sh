@@ -287,19 +287,19 @@ docker_ps() {
         docker ps -a --format "table {{.ID}}\t{{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null
         echo ""
         echo "容器操作"
-        echo "------------------------"
+        echo "----------------------------------------"
         echo "1. 创建新的容器"
-        echo "------------------------"
+        echo "----------------------------------------"
         echo "2. 启动指定容器             6. 启动所有容器"
         echo "3. 停止指定容器             7. 停止所有容器"
         echo "4. 删除指定容器             8. 删除所有容器"
         echo "5. 重启指定容器             9. 重启所有容器"
-        echo "------------------------"
+        echo "----------------------------------------"
         echo "11. 进入指定容器           12. 查看容器日志"
         echo "13. 查看容器网络           14. 查看容器占用"
-        echo "------------------------"
+        echo "----------------------------------------"
         echo "0. 返回上一级选单"
-        echo "------------------------"
+        echo "----------------------------------------"
         read -e -p "请输入你的选择: " sub_choice
         case $sub_choice in
             1)
@@ -376,12 +376,12 @@ docker_image() {
         docker image ls
         echo ""
         echo "镜像操作"
-        echo "------------------------"
+        echo "----------------------------------------"
         echo "1. 获取指定镜像             3. 删除指定镜像"
         echo "2. 更新指定镜像             4. 删除所有镜像"
-        echo "------------------------"
+        echo "----------------------------------------"
         echo "0. 返回上一级选单"
-        echo "------------------------"
+        echo "----------------------------------------"
         read -e -p "请输入你的选择: " sub_choice
         case $sub_choice in
             1)
@@ -467,16 +467,16 @@ docker_ssh_migration() {
     while true; do
         clear
         send_stats "Docker备份迁移"
-        echo "======================================="
+        echo "========================================"
         echo "Docker 备份 / 迁移 / 还原"
-        echo "======================================="
+        echo "========================================"
         echo "1. 备份 Docker 环境 (容器+卷+配置)"
         echo "2. 还原 Docker 环境"
         echo "3. 迁移到远程服务器 (SSH)"
         echo "4. 查看本地备份列表"
         echo "5. 删除备份文件"
         echo "0. 返回上一级选单"
-        echo "---------------------------------------"
+        echo "----------------------------------------"
         read -e -p "请输入你的选择: " sub_choice
         case $sub_choice in
             1)
@@ -564,11 +564,11 @@ linux_docker() {
         echo -e "Docker管理"
         docker_tato
         echo -e "${gl_kjlan}------------------------"
-        echo -e "${gl_kjlan}1.   ${gl_bai}安装更新Docker环境 ${gl_huang}★${gl_bai}"
+        echo -e "${gl_kjlan}1.   ${gl_bai}安装更新Docker环境"
         echo -e "${gl_kjlan}------------------------"
-        echo -e "${gl_kjlan}2.   ${gl_bai}查看Docker全局状态 ${gl_huang}★${gl_bai}"
+        echo -e "${gl_kjlan}2.   ${gl_bai}查看Docker全局状态"
         echo -e "${gl_kjlan}------------------------"
-        echo -e "${gl_kjlan}3.   ${gl_bai}Docker容器管理 ${gl_huang}★${gl_bai}"
+        echo -e "${gl_kjlan}3.   ${gl_bai}Docker容器管理"
         echo -e "${gl_kjlan}4.   ${gl_bai}Docker镜像管理"
         echo -e "${gl_kjlan}5.   ${gl_bai}Docker网络管理"
         echo -e "${gl_kjlan}6.   ${gl_bai}Docker卷管理"
@@ -622,14 +622,14 @@ linux_docker() {
                     docker network ls 2>/dev/null
                     echo ""
                     echo "网络操作"
-                    echo "------------------------"
+                    echo "----------------------------------------"
                     echo "1. 创建网络"
                     echo "2. 加入网络"
                     echo "3. 退出网络"
                     echo "4. 删除网络"
-                    echo "------------------------"
+                    echo "----------------------------------------"
                     echo "0. 返回上一级选单"
-                    echo "------------------------"
+                    echo "----------------------------------------"
                     read -e -p "请输入你的选择: " sub_choice
                     case $sub_choice in
                         1) read -e -p "设置新网络名: " dockernetwork; docker network create $dockernetwork ;;
@@ -659,13 +659,13 @@ linux_docker() {
                     docker volume ls 2>/dev/null
                     echo ""
                     echo "卷操作"
-                    echo "------------------------"
+                    echo "----------------------------------------"
                     echo "1. 创建新卷"
                     echo "2. 删除指定卷"
                     echo "3. 删除所有卷"
-                    echo "------------------------"
+                    echo "----------------------------------------"
                     echo "0. 返回上一级选单"
-                    echo "------------------------"
+                    echo "----------------------------------------"
                     read -e -p "请输入你的选择: " sub_choice
                     case $sub_choice in
                         1) read -e -p "设置新卷名: " dockerjuan; docker volume create $dockerjuan ;;
@@ -850,9 +850,9 @@ image_build_menu() {
     while true; do
         clear
         send_stats "OpenClaw镜像构建"
-        echo "======================================="
+        echo "========================================"
         echo -e "🦞 OpenClaw 镜像构建向导 🦞"
-        echo "======================================="
+        echo "========================================"
         echo "当前镜像: ${gl_kjlan}${OC_IMAGE_NAME}${gl_bai}"
         echo ""
         echo "镜像状态:"
@@ -869,14 +869,14 @@ image_build_menu() {
             echo -e "  ${gl_huang}虚悬镜像: ${dangling_count} 个 (可用选项4清理)${gl_bai}"
         fi
         echo ""
-        echo "------------------------"
+        echo "----------------------------------------"
         echo -e "${gl_kjlan}1.${gl_bai} 构建镜像 (使用 dockerfile)"
         echo -e "${gl_kjlan}2.${gl_bai} 更新镜像 (重新构建)"
         echo -e "${gl_kjlan}3.${gl_bai} 查看本地镜像列表"
         echo -e "${gl_kjlan}4.${gl_bai} 清理虚悬镜像 (<none>)"
-        echo "------------------------"
+        echo "----------------------------------------"
         echo -e "${gl_kjlan}0.${gl_bai} 返回主菜单"
-        echo "------------------------"
+        echo "----------------------------------------"
         read -e -p "请输入你的选择: " sub_choice
         case $sub_choice in
             1) _oc_build_image ;;
@@ -898,9 +898,9 @@ install_wizard_menu() {
     while true; do
         clear
         send_stats "OpenClaw安装向导"
-        echo "======================================="
+        echo "========================================"
         echo -e "🦞 OpenClaw 安装向导 🦞"
-        echo "======================================="
+        echo "========================================"
         echo "安装目录: ${gl_kjlan}$OC_HOME${gl_bai}"
         echo "配置目录: ${gl_kjlan}$OC_CONFIG_DIR${gl_bai}"
         echo "镜像名:   ${gl_kjlan}$OC_IMAGE_NAME${gl_bai}"
@@ -919,21 +919,21 @@ install_wizard_menu() {
             echo -e "  ${gl_hui}未运行${gl_bai}"
         fi
         echo ""
-        echo "------------------------"
-        echo "1. 完整安装向导 (推荐)      ★"
-        echo "2. 仅生成 docker-compose.yml"
-        echo "3. 仅生成 .env 配置"
-        echo "4. 启动 OpenClaw 容器"
-        echo "5. 停止 OpenClaw 容器"
-        echo "6. 重启 OpenClaw 容器"
-        echo "7. 查看容器日志"
-        echo "8. 进入容器终端"
-        echo "9. 重新生成配置 (覆盖)"
-        echo "10. 配置向导 (onboard)"
-        echo "11. 查看访问地址和 Token"
-        echo "------------------------"
-        echo "0. 返回主菜单"
-        echo "------------------------"
+        echo "----------------------------------------"
+        echo -e "${gl_kjlan}1.${gl_bai} 完整安装向导 ${gl_huang}(推荐)${gl_bai}"
+        echo -e "${gl_kjlan}2.${gl_bai} 仅生成 docker-compose.yml"
+        echo -e "${gl_kjlan}3.${gl_bai} 仅生成 .env 配置"
+        echo -e "${gl_kjlan}4.${gl_bai} 启动 OpenClaw 容器"
+        echo -e "${gl_kjlan}5.${gl_bai} 停止 OpenClaw 容器"
+        echo -e "${gl_kjlan}6.${gl_bai} 重启 OpenClaw 容器"
+        echo -e "${gl_kjlan}7.${gl_bai} 查看容器日志"
+        echo -e "${gl_kjlan}8.${gl_bai} 进入容器终端"
+        echo -e "${gl_kjlan}9.${gl_bai} 重新生成配置 (覆盖)"
+        echo -e "${gl_kjlan}10.${gl_bai} 配置向导 (onboard)"
+        echo -e "${gl_kjlan}11.${gl_bai} 查看访问地址和 Token"
+        echo "----------------------------------------"
+        echo -e "${gl_kjlan}0.${gl_bai} 返回主菜单"
+        echo "----------------------------------------"
         read -e -p "请输入你的选择: " sub_choice
         case $sub_choice in
             1) full_install_wizard ;;
@@ -1190,9 +1190,9 @@ run_onboarding() {
 
 # 显示访问信息
 show_access_info() {
-    echo "======================================="
+    echo "========================================"
     echo "OpenClaw 访问信息"
-    echo "======================================="
+    echo "========================================"
 
     ip_address
 
@@ -1239,9 +1239,9 @@ show_access_info() {
 
 # 完整安装向导
 full_install_wizard() {
-    echo "======================================="
+    echo "========================================"
     echo -e "🦞 OpenClaw 完整安装向导 🦞"
-    echo "======================================="
+    echo "========================================"
     echo ""
 
     # 1. 前置检查
@@ -1625,8 +1625,8 @@ add-openclaw-provider-interactive() {
     [ -z "$default_model" ] && default_model="${model_array[0]}"
 
     echo ""
-    echo "1) 添加全部模型 + 设为默认"
-    echo "2) 仅添加默认模型 ($default_model)"
+    echo "1. 添加全部模型 + 设为默认"
+    echo "2. 仅添加默认模型 ($default_model)"
     read -e -p "请选择 (1/2): " add_choice
     case "$add_choice" in
         1)
@@ -1662,9 +1662,9 @@ openclaw_api_manage_list() {
         echo "ℹ️ 未配置任何 provider"
         return 0
     }
-    echo "======================================="
+    echo "========================================"
     echo "已配置的 API Provider"
-    echo "======================================="
+    echo "========================================"
     printf "%-4s %-20s %-40s %-15s %-10s\n" "#" "名称" "Base URL" "协议" "模型数"
     echo "-------------------------------------------------------------------------------"
     local i=1
@@ -1781,9 +1781,9 @@ delete-openclaw-provider-interactive() {
 # API 厂商推荐
 openclaw_api_providers_showcase() {
     send_stats "OpenClaw API厂商推荐"
-    echo "======================================="
+    echo "========================================"
     echo "API 厂商推荐"
-    echo "======================================="
+    echo "========================================"
     echo -e "${gl_kjlan}DeepSeek${gl_bai}    https://api.deepseek.com/v1"
     echo -e "${gl_kjlan}OpenRouter${gl_bai}  https://openrouter.ai/api/v1"
     echo -e "${gl_kjlan}Kimi${gl_bai}        https://api.moonshot.cn/v1"
@@ -1795,25 +1795,25 @@ openclaw_api_providers_showcase() {
     echo -e "${gl_kjlan}LM Studio${gl_bai}   http://host.docker.internal:1234/v1"
     echo ""
     echo -e "${gl_huang}提示: 容器内访问宿主机服务请用 host.docker.internal${gl_bai}"
-    echo "======================================="
+    echo "========================================"
 }
 
 # API 管理菜单
 openclaw_api_manage_menu() {
     while true; do
         clear
-        echo "======================================="
+        echo "========================================"
         echo "OpenClaw API 管理"
-        echo "======================================="
+        echo "========================================"
         openclaw_api_manage_list
         echo "1. 添加 API Provider"
         echo "2. 同步 API 模型列表"
         echo "3. 切换 API 协议 (completions/responses)"
         echo "4. 删除 API Provider"
         echo "5. API 厂商推荐"
-        echo "0. 返回上一级"
-        echo "---------------------------------------"
-        read -e -p "请输入选择: " sub_choice
+        echo "0. 返回上一级选单"
+        echo "----------------------------------------"
+        read -e -p "请输入你的选择: " sub_choice
         case $sub_choice in
             1) add-openclaw-provider-interactive; break_end ;;
             2) sync-openclaw-provider-interactive; break_end ;;
@@ -1821,7 +1821,7 @@ openclaw_api_manage_menu() {
             4) delete-openclaw-provider-interactive; break_end ;;
             5) openclaw_api_providers_showcase; break_end ;;
             0) return 0 ;;
-            *) echo "无效选择"; sleep 1 ;;
+            *) echo "无效的输入!"; sleep 1 ;;
         esac
     done
 }
@@ -1882,7 +1882,7 @@ change_model() {
     [ -z "$model_choice" ] && return 0
     local selected="${model_refs[$((model_choice-1))]}"
     [ -z "$selected" ] && {
-        echo "无效选择"
+        echo "无效的输入!"
         break_end
         return 1
     }
@@ -1951,9 +1951,9 @@ install_plugin() {
         echo "  [memory-core] [memory-lancedb] [copilot-proxy]"
         echo "  [lobster] [voice-call] [nostr]"
         echo "--------------------------------------------------------"
-        echo "1) 安装/启用插件"
-        echo "2) 删除/禁用插件"
-        echo "0) 返回"
+        echo "1. 安装/启用插件"
+        echo "2. 删除/禁用插件"
+        echo "0. 返回上一级选单"
         read -e -p "请选择操作: " plugin_action
         [ "$plugin_action" = "0" ] && break
         [ -z "$plugin_action" ] && continue
@@ -2000,9 +2000,9 @@ install_skill() {
         echo "  things-mac bluebubbles himalaya summarize openhue video-frames"
         echo "  openai-whisper coding-agent"
         echo "----------------------------------------"
-        echo "1) 安装技能"
-        echo "2) 删除技能"
-        echo "0) 返回"
+        echo "1. 安装技能"
+        echo "2. 删除技能"
+        echo "0. 返回上一级选单"
         read -e -p "请选择操作: " skill_action
         [ "$skill_action" = "0" ] && break
         [ -z "$skill_action" ] && continue
@@ -2050,18 +2050,18 @@ openclaw_webui_menu() {
     while true; do
         clear
         send_stats "OpenClaw WebUI"
-        echo "======================================="
+        echo "========================================"
         echo "OpenClaw WebUI 访问与设置"
-        echo "======================================="
+        echo "========================================"
         show_access_info
-        echo "---------------------------------------"
+        echo "----------------------------------------"
         echo "1. 重新显示访问地址和 Token"
         echo "2. 获取新的 dashboard 链接"
         echo "3. 查看设备列表"
         echo "4. 审批设备 (approve)"
-        echo "0. 返回上一级"
-        echo "---------------------------------------"
-        read -e -p "请输入选择: " sub_choice
+        echo "0. 返回上一级选单"
+        echo "----------------------------------------"
+        read -e -p "请输入你的选择: " sub_choice
         case $sub_choice in
             1) show_access_info ;;
             2) oc_exec dashboard --no-open 2>&1 | head -20 ;;
@@ -2080,18 +2080,18 @@ openclaw_memory_menu() {
     while true; do
         clear
         send_stats "OpenClaw 记忆管理"
-        echo "======================================="
+        echo "========================================"
         echo "OpenClaw 记忆 / Memory"
-        echo "======================================="
+        echo "========================================"
         echo "1. 查看记忆列表"
         echo "2. 查看记忆详情"
         echo "3. 添加记忆"
         echo "4. 删除记忆"
         echo "5. 清空所有记忆"
         echo "6. 记忆统计"
-        echo "0. 返回上一级"
-        echo "---------------------------------------"
-        read -e -p "请输入选择: " sub_choice
+        echo "0. 返回上一级选单"
+        echo "----------------------------------------"
+        read -e -p "请输入你的选择: " sub_choice
         case $sub_choice in
             1) oc_exec memory list 2>&1 | head -50 ;;
             2)
@@ -2121,18 +2121,18 @@ openclaw_permission_menu() {
     while true; do
         clear
         send_stats "OpenClaw 权限管理"
-        echo "======================================="
+        echo "========================================"
         echo "OpenClaw 权限管理"
-        echo "======================================="
+        echo "========================================"
         echo "1. 查看权限列表"
         echo "2. 授予权限"
         echo "3. 撤销权限"
         echo "4. 查看角色列表"
         echo "5. 创建角色"
         echo "6. 删除角色"
-        echo "0. 返回上一级"
-        echo "---------------------------------------"
-        read -e -p "请输入选择: " sub_choice
+        echo "0. 返回上一级选单"
+        echo "----------------------------------------"
+        read -e -p "请输入你的选择: " sub_choice
         case $sub_choice in
             1) oc_exec permissions list 2>&1 ;;
             2)
@@ -2162,18 +2162,18 @@ openclaw_multiagent_menu() {
     while true; do
         clear
         send_stats "OpenClaw 多智能体"
-        echo "======================================="
+        echo "========================================"
         echo "OpenClaw 多智能体管理"
-        echo "======================================="
+        echo "========================================"
         echo "1. 查看智能体列表"
         echo "2. 创建智能体"
         echo "3. 删除智能体"
         echo "4. 查看智能体详情"
         echo "5. 设置默认智能体"
         echo "6. 查看会话列表"
-        echo "0. 返回上一级"
-        echo "---------------------------------------"
-        read -e -p "请输入选择: " sub_choice
+        echo "0. 返回上一级选单"
+        echo "----------------------------------------"
+        read -e -p "请输入你的选择: " sub_choice
         case $sub_choice in
             1) oc_exec agents list 2>&1 ;;
             2)
@@ -2279,18 +2279,18 @@ openclaw_backup_restore_menu() {
     send_stats "OpenClaw备份与还原"
     while true; do
         clear
-        echo "======================================="
+        echo "========================================"
         echo "OpenClaw 备份与还原"
-        echo "======================================="
+        echo "========================================"
         openclaw_backup_render_file_list
-        echo "---------------------------------------"
+        echo "----------------------------------------"
         echo "1. 备份记忆全量"
         echo "2. 还原记忆全量"
         echo "3. 备份 OpenClaw 项目 (安全模式)"
         echo "4. 还原 OpenClaw 项目 (高级/高风险)"
         echo "5. 删除备份文件"
-        echo "0. 返回上一级"
-        echo "---------------------------------------"
+        echo "0. 返回上一级选单"
+        echo "----------------------------------------"
         read -e -p "请输入你的选择: " backup_choice
         case "$backup_choice" in
             1) openclaw_memory_backup_export; break_end ;;
@@ -2299,7 +2299,7 @@ openclaw_backup_restore_menu() {
             4) openclaw_project_backup_import; break_end ;;
             5) openclaw_backup_delete_file; break_end ;;
             0) return 0 ;;
-            *) echo "无效的选择"; sleep 1 ;;
+            *) echo "无效的输入!"; sleep 1 ;;
         esac
     done
 }
@@ -2307,15 +2307,15 @@ openclaw_backup_restore_menu() {
 # 机器人连接对接
 change_tg_bot_code() {
     send_stats "机器人连接对接"
-    echo "======================================="
+    echo "========================================"
     echo "机器人连接对接"
-    echo "======================================="
+    echo "========================================"
     echo "选择渠道:"
     echo "1. Telegram"
     echo "2. Discord"
     echo "3. WhatsApp (QR)"
     echo "4. 飞书 (Feishu/Lark)"
-    echo "0. 返回"
+    echo "0. 返回上一级选单"
     read -e -p "请选择: " channel_choice
     case $channel_choice in
         1)
@@ -2349,14 +2349,14 @@ openclaw_container_menu() {
         running_status=$(get_running_status)
         update_message=$(check_openclaw_update 2>/dev/null)
 
-        echo "======================================="
+        echo "========================================"
         echo -e "🦞 OPENCLAW 容器管理 (Docker) 🦞"
-        echo "======================================="
+        echo "========================================"
         echo -e "$install_status $running_status $update_message"
-        echo "======================================="
+        echo "========================================"
         echo "1.  启动容器              2.  停止容器"
         echo "3.  重启容器              4.  状态日志查看"
-        echo "--------------------"
+        echo "----------------------------------------"
         echo "5.  换模型"
         echo "6.  API管理"
         echo "7.  机器人连接对接"
@@ -2370,14 +2370,14 @@ openclaw_container_menu() {
         echo "15. 记忆/Memory"
         echo "16. 权限管理"
         echo "17. 多智能体管理"
-        echo "--------------------"
+        echo "----------------------------------------"
         echo "18. 备份与还原"
         echo "19. 更新 (拉取最新镜像)"
         echo "20. 卸载 (停止并删除容器)"
-        echo "--------------------"
-        echo "0.  返回主菜单"
-        echo "--------------------"
-        read -e -p "请输入选项并回车: " choice
+        echo "----------------------------------------"
+        echo "0. 返回主菜单"
+        echo "----------------------------------------"
+        read -e -p "请输入你的选择: " choice
         case $choice in
             1) start_bot ;;
             2) stop_bot ;;
@@ -2412,7 +2412,7 @@ openclaw_container_menu() {
             19) update_moltbot ;;
             20) uninstall_moltbot ;;
             0) break ;;
-            *) echo "无效输入"; sleep 1 ;;
+            *) echo "无效的输入!"; sleep 1 ;;
         esac
     done
 }
@@ -2434,19 +2434,19 @@ main_menu() {
       |_|
 LOGO
         echo -e "${gl_bai}"
-        echo "======================================="
+        echo "========================================"
         echo -e "  OpenClaw Docker 管理脚本 v${sh_v}"
-        echo "======================================="
+        echo "========================================"
         echo ""
         echo -e "${gl_kjlan}脚本向导选项:${gl_bai}"
-        echo "------------------------"
+        echo "----------------------------------------"
         echo -e "${gl_kjlan}1.${gl_bai} Docker 环境管理 (安装/管理/卸载)"
         echo -e "${gl_kjlan}2.${gl_bai} OpenClaw 镜像构建向导"
         echo -e "${gl_kjlan}3.${gl_bai} OpenClaw 安装向导 (Compose+持久化)"
         echo -e "${gl_kjlan}4.${gl_bai} OpenClaw 容器管理 (全量功能)"
-        echo "------------------------"
+        echo "----------------------------------------"
         echo -e "${gl_kjlan}0.${gl_bai} 退出"
-        echo "------------------------"
+        echo "----------------------------------------"
         read -e -p "请输入你的选择: " choice
         case $choice in
             1) linux_docker ;;
