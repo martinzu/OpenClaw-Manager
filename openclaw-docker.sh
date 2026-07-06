@@ -10,14 +10,16 @@
 sh_v="1.0.0"
 
 # ---------- 颜色 ----------
-gl_hui='\e[37m'
-gl_hong='\033[31m'
-gl_lv='\033[32m'
-gl_huang='\033[33m'
-gl_lan='\033[34m'
-gl_bai='\033[0m'
-gl_zi='\033[35m'
-gl_kjlan='\033[96m'
+# 用 $'...' ANSI-C quoting, 变量内存储真实 ESC 字符, 不依赖 echo -e 解析,
+# 兼容 dash / POSIX 模式 / curl|bash 等场景.
+gl_hui=$'\e[37m'
+gl_hong=$'\033[31m'
+gl_lv=$'\033[32m'
+gl_huang=$'\033[33m'
+gl_lan=$'\033[34m'
+gl_bai=$'\033[0m'
+gl_zi=$'\033[35m'
+gl_kjlan=$'\033[96m'
 
 # ---------- 全局配置 ----------
 OC_HOME="${OC_HOME:-/home/docker/openclaw}"
