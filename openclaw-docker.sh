@@ -33,8 +33,6 @@ ENV_FILE="$OC_HOME/.env"
 OC_CONTAINER="openclaw-gateway"
 OC_CLI_CONTAINER="openclaw-cli"
 OC_IMAGE_NAME="${OC_IMAGE_NAME:-openclaw:local}"
-OC_DOCKERFILE_URL="${OC_DOCKERFILE_URL:-}"          # 外链 dockerfile，留空则用本地
-OC_LOCAL_DOCKERFILE="${OC_LOCAL_DOCKERFILE:-}"      # 本地 dockerfile 路径，留空则向导时询问
 OC_GATEWAY_PORT="${OC_GATEWAY_PORT:-18789}"
 OC_GATEWAY_BIND="${OC_GATEWAY_BIND:-lan}"           # lan | loopback
 OC_HOME_VOLUME="${OC_HOME_VOLUME:-}"                # 留空=bind mount，填卷名=命名卷
@@ -731,7 +729,122 @@ linux_docker() {
 
 # ============================================================================
 #  选项 2: OpenClaw 镜像构建向导
+#  - 自动从脚本所在目录或 GitHub 仓库获取 dockerfile
 # ============================================================================
+
+OC_DOCKERFILE_RAW_URL="https://raw.githubusercontent.com/martinzu/OpenClaw-Manager/main/dockerfile"
+
+_oc_resolve_dockerfile() {
+    local script_dir
+    script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null)
+
+    if [ -n "$script_dir" ] && [ -f "$script_dir/dockerfile" ]; then
+        _OC_DOCKERFILE_PATH="$script_dir/dockerfile"
+        _OC_DOCKERFILE_CONTEXT="$script_dir"
+        _OC_DOCKERFILE_TMP=""
+        return 0
+    fi
+
+    if [ -f "./dockerfile" ]; then
+        _OC_DOCKERFILE_PATH="$(pwd)/dockerfile"
+        _OC_DOCKERFILE_CONTEXT="$(pwd)"
+        _OC_DOCKERFILE_TMP=""
+        return 0
+    fi
+
+    echo -e "${gl_huang}本地未找到 dockerfile, 正在从 GitHub 下载...${gl_bai}"
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
+    if curl -fsSL "$OC_DOCKERFILE_RAW_URL" -o "$tmp_dir/dockerfile"; then
+        echo -e "${gl_lv}dockerfile 下载成功${gl_bai}"
+        _OC_DOCKERFILE_PATH="$tmp_dir/dockerfile"
+        _OC_DOCKERFILE_CONTEXT="$tmp_dir"
+        _OC_DOCKERFILE_TMP="$tmp_dir"
+        return 0
+    else
+        echo -e "${gl_hong}dockerfile 下载失败, 请检查网络或手动将 dockerfile 放到脚本同目录${gl_bai}"
+        rm -rf "$tmp_dir"
+        return 1
+    fi
+}
+
+_oc_cleanup_dockerfile() {
+    if [ -n "$_OC_DOCKERFILE_TMP" ] && [ -d "$_OC_DOCKERFILE_TMP" ]; then
+        rm -rf "$_OC_DOCKERFILE_TMP"
+    fi
+}
+
+_oc_build_image() {
+    local is_update="${1:-}"
+    install_docker
+
+    if ! _oc_resolve_dockerfile; then
+        break_end
+        return 1
+    fi
+
+    echo ""
+    echo -e "${gl_kjlan}Dockerfile: ${_OC_DOCKERFILE_PATH}${gl_bai}"
+    echo -e "${gl_kjlan}构建上下文: ${_OC_DOCKERFILE_CONTEXT}${gl_bai}"
+    echo -e "${gl_kjlan}镜像标签:   $OC_IMAGE_NAME${gl_bai}"
+    echo ""
+
+    if [ "$is_update" = "1" ] && docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -q "^${OC_IMAGE_NAME}$"; then
+        local old_id
+        old_id=$(docker images "$OC_IMAGE_NAME" --format '{{.ID}}')
+        echo -e "${gl_huang}更新前镜像 ID: $old_id (更新后将变为 <none> 虚悬镜像, 可用选项4清理)${gl_bai}"
+        echo ""
+    fi
+
+    echo -e "${gl_kjlan}开始构建镜像...${gl_bai}"
+    if docker build -t "$OC_IMAGE_NAME" -f "$_OC_DOCKERFILE_PATH" "$_OC_DOCKERFILE_CONTEXT"; then
+        echo ""
+        echo -e "${gl_lv}========================================${gl_bai}"
+        echo -e "${gl_lv}  镜像构建成功: $OC_IMAGE_NAME${gl_bai}"
+        echo -e "${gl_lv}========================================${gl_bai}"
+        docker images "$OC_IMAGE_NAME" --format '  ID: {{.ID}}  大小: {{.Size}}  创建: {{.CreatedSince}}'
+    else
+        echo ""
+        echo -e "${gl_hong}镜像构建失败, 请检查 dockerfile 和 Docker 环境${gl_bai}"
+    fi
+
+    _oc_cleanup_dockerfile
+
+    if [ "$is_update" = "1" ] && oc_container_running; then
+        echo ""
+        read -e -p "镜像已更新, 是否重启 OpenClaw 容器以应用新镜像? (Y/n): " restart_choice
+        if [[ ! "$restart_choice" =~ ^[Nn] ]]; then
+            cd "$OC_HOME" && docker compose -f "$COMPOSE_FILE" up -d --force-recreate "$OC_CONTAINER"
+            echo -e "${gl_lv}容器已重启${gl_bai}"
+        fi
+    fi
+
+    break_end
+}
+
+_oc_prune_images() {
+    install_docker
+    local dangling_count
+    dangling_count=$(docker images -f "dangling=true" -q 2>/dev/null | wc -l | tr -d ' ')
+
+    if [ "$dangling_count" -eq 0 ]; then
+        echo -e "${gl_lv}没有虚悬镜像需要清理${gl_bai}"
+        break_end
+        return 0
+    fi
+
+    echo -e "${gl_huang}发现 ${dangling_count} 个虚悬镜像 (<none>):${gl_bai}"
+    docker images -f "dangling=true"
+    echo ""
+    read -e -p "是否清理这些虚悬镜像? (y/N): " confirm
+    if [[ "$confirm" =~ ^[Yy] ]]; then
+        docker image prune -f
+        echo -e "${gl_lv}虚悬镜像已清理${gl_bai}"
+    else
+        echo "已取消"
+    fi
+    break_end
+}
 
 image_build_menu() {
     while true; do
@@ -744,190 +857,36 @@ image_build_menu() {
         echo ""
         echo "镜像状态:"
         if docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -q "^${OC_IMAGE_NAME}$"; then
-            local img_info=$(docker images "$OC_IMAGE_NAME" --format '{{.ID}} {{.Size}} {{.CreatedSince}}')
+            local img_info
+            img_info=$(docker images "$OC_IMAGE_NAME" --format '{{.ID}} {{.Size}} {{.CreatedSince}}')
             echo -e "  ${gl_lv}已构建${gl_bai}  $img_info"
         else
             echo -e "  ${gl_hui}未构建${gl_bai}"
         fi
+        local dangling_count
+        dangling_count=$(docker images -f "dangling=true" -q 2>/dev/null | wc -l | tr -d ' ')
+        if [ "$dangling_count" -gt 0 ]; then
+            echo -e "  ${gl_huang}虚悬镜像: ${dangling_count} 个 (可用选项4清理)${gl_bai}"
+        fi
         echo ""
         echo "------------------------"
-        echo "1. 从本地 dockerfile 构建        ★"
-        echo "2. 从外链 dockerfile 构建 (GitHub Raw)"
-        echo "3. 拉取官方镜像 ghcr.io/openclaw/openclaw"
-        echo "4. 拉取官方镜像 openclaw/openclaw (Docker Hub)"
-        echo "5. 更新镜像 (重新构建/拉取)"
-        echo "6. 查看本地镜像列表"
-        echo "7. 删除指定镜像"
-        echo "8. 设置默认镜像名"
+        echo -e "${gl_kjlan}1.${gl_bai} 构建镜像 (使用 dockerfile)"
+        echo -e "${gl_kjlan}2.${gl_bai} 更新镜像 (重新构建)"
+        echo -e "${gl_kjlan}3.${gl_bai} 查看本地镜像列表"
+        echo -e "${gl_kjlan}4.${gl_bai} 清理虚悬镜像 (<none>)"
         echo "------------------------"
-        echo "0. 返回主菜单"
+        echo -e "${gl_kjlan}0.${gl_bai} 返回主菜单"
         echo "------------------------"
         read -e -p "请输入你的选择: " sub_choice
         case $sub_choice in
-            1) build_from_local_dockerfile ;;
-            2) build_from_remote_dockerfile ;;
-            3) pull_official_image "ghcr.io/openclaw/openclaw:latest" ;;
-            4) pull_official_image "openclaw/openclaw:latest" ;;
-            5) update_image ;;
-            6) docker image ls; break_end ;;
-            7)
-                read -e -p "请输入镜像名: " img_name
-                docker rmi -f "$img_name" 2>/dev/null
-                break_end
-                ;;
-            8)
-                read -e -p "请输入默认镜像名 (如 openclaw:local): " new_image
-                [ -n "$new_image" ] && OC_IMAGE_NAME="$new_image"
-                echo -e "${gl_lv}已设置为: $OC_IMAGE_NAME${gl_bai}"
-                break_end
-                ;;
+            1) _oc_build_image ;;
+            2) _oc_build_image 1 ;;
+            3) docker image ls; break_end ;;
+            4) _oc_prune_images ;;
             0) return 0 ;;
             *) echo "无效的输入!"; sleep 1 ;;
         esac
     done
-}
-
-# 从本地 dockerfile 构建
-build_from_local_dockerfile() {
-    install_docker
-    local dockerfile_path="$OC_LOCAL_DOCKERFILE"
-
-    if [ -z "$dockerfile_path" ]; then
-        # 优先检测当前目录和脚本同目录的 dockerfile
-        local script_dir
-        script_dir=$(cd "$(dirname "$0")" && pwd)
-        if [ -f "$script_dir/dockerfile" ]; then
-            dockerfile_path="$script_dir/dockerfile"
-            echo -e "${gl_kjlan}检测到同目录 dockerfile: $dockerfile_path${gl_bai}"
-            read -e -p "使用此 dockerfile? (Y/n): " use_default
-            [[ "$use_default" =~ ^[Nn] ]] && dockerfile_path=""
-        fi
-    fi
-
-    if [ -z "$dockerfile_path" ]; then
-        read -e -p "请输入 dockerfile 路径: " dockerfile_path
-    fi
-
-    if [ ! -f "$dockerfile_path" ]; then
-        echo -e "${gl_hong}文件不存在: $dockerfile_path${gl_bai}"
-        break_end
-        return 1
-    fi
-
-    local build_context
-    build_context=$(dirname "$dockerfile_path")
-    local tag_name
-    read -e -p "请输入镜像标签 (默认 $OC_IMAGE_NAME): " tag_name
-    [ -z "$tag_name" ] && tag_name="$OC_IMAGE_NAME"
-
-    echo -e "${gl_kjlan}开始构建镜像: $tag_name${gl_bai}"
-    echo -e "${gl_kjlan}Dockerfile: $dockerfile_path${gl_bai}"
-    echo -e "${gl_kjlan}构建上下文: $build_context${gl_bai}"
-    echo ""
-
-    if docker build -t "$tag_name" -f "$dockerfile_path" "$build_context"; then
-        OC_IMAGE_NAME="$tag_name"
-        echo -e "${gl_lv}镜像构建成功: $tag_name${gl_bai}"
-    else
-        echo -e "${gl_hong}镜像构建失败${gl_bai}"
-    fi
-    break_end
-}
-
-# 从外链 dockerfile 构建 (GitHub Raw)
-build_from_remote_dockerfile() {
-    install_docker
-    local url="$OC_DOCKERFILE_URL"
-
-    if [ -z "$url" ]; then
-        echo "请输入 dockerfile 的 URL (如 GitHub Raw 链接):"
-        echo "示例: https://raw.githubusercontent.com/<user>/<repo>/main/dockerfile"
-        read -e -p "URL: " url
-    fi
-
-    if [ -z "$url" ]; then
-        echo -e "${gl_hong}URL 不能为空${gl_bai}"
-        break_end
-        return 1
-    fi
-
-    echo -e "${gl_kjlan}正在下载 dockerfile...${gl_bai}"
-    local tmp_dir
-    tmp_dir=$(mktemp -d)
-    if curl -fsSL "$url" -o "$tmp_dir/dockerfile"; then
-        echo -e "${gl_lv}下载成功${gl_bai}"
-        local tag_name
-        read -e -p "请输入镜像标签 (默认 $OC_IMAGE_NAME): " tag_name
-        [ -z "$tag_name" ] && tag_name="$OC_IMAGE_NAME"
-
-        echo -e "${gl_kjlan}开始构建镜像: $tag_name${gl_bai}"
-        if docker build -t "$tag_name" "$tmp_dir"; then
-            OC_IMAGE_NAME="$tag_name"
-            OC_DOCKERFILE_URL="$url"
-            echo -e "${gl_lv}镜像构建成功: $tag_name${gl_bai}"
-            echo -e "${gl_kjlan}外链已记录，下次可直接使用${gl_bai}"
-        else
-            echo -e "${gl_hong}镜像构建失败${gl_bai}"
-        fi
-    else
-        echo -e "${gl_hong}下载失败，请检查 URL${gl_bai}"
-    fi
-    rm -rf "$tmp_dir"
-    break_end
-}
-
-# 拉取官方镜像
-pull_official_image() {
-    install_docker
-    local official_image="$1"
-    local tag_name
-
-    echo -e "${gl_kjlan}正在拉取官方镜像: $official_image${gl_bai}"
-    if docker pull "$official_image"; then
-        echo -e "${gl_lv}拉取成功${gl_bai}"
-        read -e -p "是否将其标记为 $OC_IMAGE_NAME? (Y/n): " retag
-        if [[ ! "$retag" =~ ^[Nn] ]]; then
-            docker tag "$official_image" "$OC_IMAGE_NAME"
-            echo -e "${gl_lv}已标记为: $OC_IMAGE_NAME${gl_bai}"
-        fi
-    else
-        echo -e "${gl_hong}拉取失败${gl_bai}"
-    fi
-    break_end
-}
-
-# 更新镜像
-update_image() {
-    install_docker
-    echo -e "${gl_kjlan}更新镜像: $OC_IMAGE_NAME${gl_bai}"
-    echo "请选择更新方式:"
-    echo "1. 重新构建 (本地 dockerfile)"
-    echo "2. 重新构建 (外链 dockerfile)"
-    echo "3. 重新拉取 (官方镜像)"
-    read -e -p "请选择: " update_choice
-    case $update_choice in
-        1) build_from_local_dockerfile ;;
-        2) build_from_remote_dockerfile ;;
-        3)
-            if [[ "$OC_IMAGE_NAME" == *"ghcr.io"* ]] || [[ "$OC_IMAGE_NAME" == *"openclaw/openclaw"* ]]; then
-                pull_official_image "$OC_IMAGE_NAME"
-            else
-                read -e -p "请输入官方镜像地址: " official
-                pull_official_image "$official"
-            fi
-            ;;
-        *) echo "无效选择" ;;
-    esac
-
-    # 如果容器正在运行，提示重启
-    if oc_container_running; then
-        read -e -p "镜像已更新，是否重启 OpenClaw 容器以应用新镜像? (Y/n): " restart_choice
-        if [[ ! "$restart_choice" =~ ^[Nn] ]]; then
-            cd "$OC_HOME" && docker compose -f "$COMPOSE_FILE" up -d --force-recreate openclaw-gateway
-            echo -e "${gl_lv}容器已重启${gl_bai}"
-        fi
-    fi
-    break_end
 }
 
 # ============================================================================
@@ -1044,18 +1003,9 @@ check_prerequisites() {
         echo -e "${gl_lv}✓ 镜像已存在: $OC_IMAGE_NAME${gl_bai}"
     else
         echo -e "${gl_huang}⚠ 镜像不存在: $OC_IMAGE_NAME${gl_bai}"
-        read -e -p "是否现在构建/拉取镜像? (Y/n): " build_choice
+        read -e -p "是否现在构建镜像? (Y/n): " build_choice
         if [[ ! "$build_choice" =~ ^[Nn] ]]; then
-            echo "请选择构建方式:"
-            echo "1. 本地 dockerfile 构建"
-            echo "2. 外链 dockerfile 构建"
-            echo "3. 拉取官方镜像"
-            read -e -p "请选择: " build_method
-            case $build_method in
-                1) build_from_local_dockerfile ;;
-                2) build_from_remote_dockerfile ;;
-                3) pull_official_image "ghcr.io/openclaw/openclaw:latest" ;;
-            esac
+            _oc_build_image
         else
             return 1
         fi
