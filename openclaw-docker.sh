@@ -329,7 +329,7 @@ ensure_oc_dirs() {
 }
 
 # 在容器内执行 openclaw 命令 (非交互)
-# cli 服务配置了 entrypoint: ["openclaw"], 故 run 时直接传子命令参数即可
+# 使用 --entrypoint 显式指定入口, 避免镜像 CMD 残留参数导致 "Too many arguments"
 oc_exec() {
     if [ ! -f "$COMPOSE_FILE" ]; then
         echo -e "${gl_hong}未找到 docker-compose.yml，请先运行选项3 安装向导${gl_bai}"
@@ -340,7 +340,7 @@ oc_exec() {
         return 1
     fi
     cd "$OC_HOME" || return 1
-    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" run --rm -T cli "$@"
+    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" run --rm -T --entrypoint openclaw cli "$@"
 }
 
 # 在容器内执行 openclaw 命令 (交互式，带 TTY)
@@ -354,7 +354,7 @@ oc_exec_it() {
         return 1
     fi
     cd "$OC_HOME" || return 1
-    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" run --rm cli "$@"
+    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" run --rm --entrypoint openclaw cli "$@"
 }
 
 # 在容器内执行任意命令 (非交互, 不经过 entrypoint)
@@ -1350,6 +1350,7 @@ ${gateway_volumes}
     container_name: ${OC_CLI_CONTAINER}
     network_mode: "service:gateway"
     entrypoint: ["openclaw"]
+    command: []
     stdin_open: true
     tty: true
 ${cli_volumes}
