@@ -1614,7 +1614,7 @@ full_install_wizard() {
 
 # ============================================================================
 #  选项 4: OpenClaw 容器管理 (全量搬运 kejilion.sh moltbot_menu)
-#  适配: openclaw xxx → docker compose run --rm cli openclaw xxx (cli 为临时任务容器)
+#  适配: openclaw xxx → docker compose run --rm cli xxx (cli 有 entrypoint, 无需重复 openclaw)
 #        ${HOME}/.openclaw/openclaw.json → $OC_CONFIG_DIR/openclaw.json (宿主机直接读写)
 # ============================================================================
 
