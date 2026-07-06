@@ -2315,7 +2315,7 @@ install_skill() {
     while true; do
         clear
         echo "========================================"
-        echo "         技能管理 (安装/删除)"
+        echo "         技能管理 (安装/查看)"
         echo "========================================"
         echo "当前已安装技能:"
         oc_exec skills list 2>/dev/null
@@ -2326,11 +2326,27 @@ install_skill() {
         echo "  openai-whisper coding-agent"
         echo "----------------------------------------"
         echo "1. 安装技能"
-        echo "2. 删除技能"
+        echo "2. 查看技能详情"
+        echo "3. 搜索技能"
+        echo "4. 检查技能依赖"
         echo "0. 返回上一级选单"
         read -e -p "请选择操作: " skill_action
         [ "$skill_action" = "0" ] && break
         [ -z "$skill_action" ] && continue
+
+        if [ "$skill_action" = "3" ]; then
+            read -e -p "请输入搜索关键词: " skill_input
+            [ -n "$skill_input" ] && oc_exec skills search "$skill_input" 2>&1
+            break_end
+            continue
+        fi
+
+        if [ "$skill_action" = "4" ]; then
+            oc_exec skills check 2>&1
+            break_end
+            continue
+        fi
+
         read -e -p "请输入技能名称 (空格分隔, 0 退出): " skill_input
         [ "$skill_input" = "0" ] && break
         [ -z "$skill_input" ] && continue
@@ -2345,11 +2361,9 @@ install_skill() {
                 else
                     echo -e "${gl_hong}✗ $token 安装失败${gl_bai}"
                 fi
-            else
-                echo -e "${gl_kjlan}删除技能: $token${gl_bai}"
-                oc_exec skills uninstall "$token" 2>/dev/null
-                echo -e "${gl_lv}✓ $token${gl_bai}"
-                changed=true
+            elif [ "$skill_action" = "2" ]; then
+                echo -e "${gl_kjlan}技能详情: $token${gl_bai}"
+                oc_exec skills info "$token" 2>&1
             fi
         done
         [ "$changed" = true ] && start_gateway
@@ -2408,75 +2422,28 @@ openclaw_memory_menu() {
         echo "========================================"
         echo "OpenClaw 记忆 / Memory"
         echo "========================================"
-        echo "1. 查看记忆列表"
-        echo "2. 查看记忆详情"
-        echo "3. 添加记忆"
-        echo "4. 删除记忆"
-        echo "5. 清空所有记忆"
-        echo "6. 记忆统计"
+        echo "1. 记忆索引状态"
+        echo "2. 搜索记忆"
+        echo "3. 重建索引"
+        echo "4. 查看提升候选"
+        echo "5. 应用提升 (写入 MEMORY.md)"
+        echo "6. REM 反思预览"
         echo "0. 返回上一级选单"
         echo "----------------------------------------"
         read -e -p "请输入你的选择: " sub_choice
         case $sub_choice in
-            1) oc_exec memory list 2>&1 | head -50 ;;
+            1) oc_exec memory status 2>&1 | head -50 ;;
             2)
-                read -e -p "请输入记忆 ID: " mem_id
-                [ -n "$mem_id" ] && oc_exec memory get "$mem_id"
+                read -e -p "请输入搜索关键词: " mem_query
+                [ -n "$mem_query" ] && oc_exec memory search "$mem_query" 2>&1 | head -50
                 ;;
-            3)
-                read -e -p "请输入记忆内容: " mem_content
-                [ -n "$mem_content" ] && oc_exec memory add "$mem_content"
-                ;;
-            4)
-                read -e -p "请输入记忆 ID: " mem_id
-                [ -n "$mem_id" ] && oc_exec memory delete "$mem_id"
-                ;;
+            3) oc_exec memory index --force 2>&1 ;;
+            4) oc_exec memory promote --limit 10 2>&1 | head -50 ;;
             5)
-                read -e -p "$(echo -e "${gl_hong}确认清空所有记忆? (y/N): ${gl_bai}")" confirm
-                [[ "$confirm" =~ ^[Yy] ]] && oc_exec memory clear
+                read -e -p "$(echo -e "${gl_huang}确认将提升候选写入 MEMORY.md? (y/N): ${gl_bai}")" confirm
+                [[ "$confirm" =~ ^[Yy] ]] && oc_exec memory promote --apply 2>&1
                 ;;
-            6) oc_exec memory stats 2>&1 ;;
-            0) return 0 ;;
-        esac
-        break_end
-    done
-}
-
-openclaw_permission_menu() {
-    while true; do
-        clear
-        send_stats "OpenClaw 权限管理"
-        echo "========================================"
-        echo "OpenClaw 权限管理"
-        echo "========================================"
-        echo "1. 查看权限列表"
-        echo "2. 授予权限"
-        echo "3. 撤销权限"
-        echo "4. 查看角色列表"
-        echo "5. 创建角色"
-        echo "6. 删除角色"
-        echo "0. 返回上一级选单"
-        echo "----------------------------------------"
-        read -e -p "请输入你的选择: " sub_choice
-        case $sub_choice in
-            1) oc_exec permissions list 2>&1 ;;
-            2)
-                read -e -p "权限名称: " perm
-                [ -n "$perm" ] && oc_exec permissions grant "$perm"
-                ;;
-            3)
-                read -e -p "权限名称: " perm
-                [ -n "$perm" ] && oc_exec permissions revoke "$perm"
-                ;;
-            4) oc_exec roles list 2>&1 ;;
-            5)
-                read -e -p "角色名称: " role
-                [ -n "$role" ] && oc_exec roles create "$role"
-                ;;
-            6)
-                read -e -p "角色名称: " role
-                [ -n "$role" ] && oc_exec roles delete "$role"
-                ;;
+            6) oc_exec memory rem-harness 2>&1 | head -50 ;;
             0) return 0 ;;
         esac
         break_end
@@ -2493,8 +2460,8 @@ openclaw_multiagent_menu() {
         echo "1. 查看智能体列表"
         echo "2. 创建智能体"
         echo "3. 删除智能体"
-        echo "4. 查看智能体详情"
-        echo "5. 设置默认智能体"
+        echo "4. 查看路由绑定"
+        echo "5. 设置智能体身份"
         echo "6. 查看会话列表"
         echo "0. 返回上一级选单"
         echo "----------------------------------------"
@@ -2503,21 +2470,18 @@ openclaw_multiagent_menu() {
             1) oc_exec agents list 2>&1 ;;
             2)
                 read -e -p "智能体名称: " agent_name
-                [ -n "$agent_name" ] && oc_exec agents create "$agent_name"
+                [ -n "$agent_name" ] && oc_exec agents add "$agent_name" 2>&1
                 ;;
             3)
                 read -e -p "智能体名称: " agent_name
-                [ -n "$agent_name" ] && oc_exec agents delete "$agent_name"
+                [ -n "$agent_name" ] && oc_exec agents delete "$agent_name" 2>&1
                 ;;
-            4)
-                read -e -p "智能体名称: " agent_name
-                [ -n "$agent_name" ] && oc_exec agents show "$agent_name"
-                ;;
+            4) oc_exec agents bindings 2>&1 ;;
             5)
                 read -e -p "智能体名称: " agent_name
-                [ -n "$agent_name" ] && oc_exec agents set-default "$agent_name"
+                [ -n "$agent_name" ] && oc_exec agents set-identity "$agent_name" 2>&1
                 ;;
-            6) oc_exec sessions list 2>&1 ;;
+            6) oc_exec sessions list 2>&1 | head -50 ;;
             0) return 0 ;;
         esac
         break_end
@@ -2704,19 +2668,18 @@ openclaw_container_menu() {
         echo "6.  API管理"
         echo "7.  机器人连接对接"
         echo "8.  插件管理（安装/删除）"
-        echo "9.  技能管理（安装/删除）"
+        echo "9.  技能管理（安装/查看）"
         echo "10. 编辑主配置文件"
         echo "11. 配置向导 (onboard)"
         echo "12. 健康检测与修复 (doctor)"
         echo "13. WebUI访问与设置"
         echo "14. TUI命令行对话窗口"
         echo "15. 记忆/Memory"
-        echo "16. 权限管理"
-        echo "17. 多智能体管理"
+        echo "16. 多智能体管理"
         echo "----------------------------------------"
-        echo "18. 备份与还原"
-        echo "19. 更新 (拉取最新镜像)"
-        echo "20. 卸载 (停止并删除容器)"
+        echo "17. 备份与还原"
+        echo "18. 更新 (拉取最新镜像)"
+        echo "19. 卸载 (停止并删除容器)"
         echo "----------------------------------------"
         echo -e "${gl_kjlan}s.${gl_bai}  切换实例"
         echo -e "${gl_kjlan}0.${gl_bai}  返回主菜单"
@@ -2750,11 +2713,10 @@ openclaw_container_menu() {
                 break_end
                 ;;
             15) openclaw_memory_menu ;;
-            16) openclaw_permission_menu ;;
-            17) openclaw_multiagent_menu ;;
-            18) openclaw_backup_restore_menu ;;
-            19) update_moltbot ;;
-            20) uninstall_moltbot ;;
+            16) openclaw_multiagent_menu ;;
+            17) openclaw_backup_restore_menu ;;
+            18) update_moltbot ;;
+            19) uninstall_moltbot ;;
             s|S)
                 oc_pick_instance "manage" || continue
                 oc_check_deployed || continue
