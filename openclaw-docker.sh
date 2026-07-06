@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================================
-#  OpenClaw Docker 管理脚本 (openclaw-docker.sh)
+#  OpenClaw Manager Shell (openclaw-docker.sh)
 #  - 选项1: Docker 环境管理 (安装/管理/卸载)，搬运自 kejilion.sh
 #  - 选项2: OpenClaw 镜像构建向导 (本地 dockerfile / 外链 / 官方镜像)
 #  - 选项3: OpenClaw 安装向导 (生成 docker-compose.yml + .env + 持久化卷)
@@ -1401,7 +1401,7 @@ run_onboarding() {
 # 显示访问信息
 show_access_info() {
     echo "========================================"
-    echo "OpenClaw 访问信息"
+    echo "OpenClaw 实例信息"
     echo "========================================"
 
     ip_address
@@ -1413,20 +1413,35 @@ show_access_info() {
     fi
 
     echo ""
-    echo -e "${gl_kjlan}本地访问:${gl_bai}"
-    echo "  http://127.0.0.1:${port}/"
-    [ -n "$token" ] && echo "  http://127.0.0.1:${port}/#token=${token}"
+    echo -e "${gl_kjlan}实例:${gl_bai}        ${OC_INSTANCE}"
+    echo -e "${gl_kjlan}目录:${gl_bai}        $OC_HOME"
+    echo -e "${gl_kjlan}容器:${gl_bai}        $OC_CONTAINER / $OC_CLI_CONTAINER"
+    echo -e "${gl_kjlan}状态:${gl_bai}        $(oc_container_running && echo -e "${gl_lv}运行中${gl_bai}" || echo -e "${gl_hong}未运行${gl_bai}")"
 
     echo ""
-    echo -e "${gl_kjlan}局域网访问:${gl_bai}"
-    echo "  http://${ipv4_address:-<your-ip>}:${port}/"
-    [ -n "$token" ] && echo "  http://${ipv4_address:-<your-ip>}:${port}/#token=${token}"
+    echo -e "${gl_huang}管理方式 (推荐):${gl_bai}"
+    echo -e "  重新运行脚本, 进入 ${gl_kjlan}选项 4 → OpenClaw 容器管理${gl_bai}"
+    echo "  可进行: 启停/日志/换模型/API管理/机器人对接/插件/技能/配置/备份/更新等所有操作"
+    echo "  快捷进入容器管理: bash $0 4"
 
     echo ""
     echo -e "${gl_kjlan}网关 Token:${gl_bai}"
     echo "  ${token}"
     echo ""
-    echo -e "${gl_huang}请将 Token 粘贴到 WebUI Settings 中完成认证${gl_bai}"
+    echo -e "${gl_huang}此 Token 用于 TUI/WebUI 认证, 请妥善保存${gl_bai}"
+
+    echo ""
+    echo -e "${gl_kjlan}WebUI 访问地址 (可选):${gl_bai}"
+    echo -e "${gl_hui}  Docker 容器内服务监听 0.0.0.0:${port}, 仅本机或 SSH 隧道访问, 无需配置 nginx 反代${gl_bai}"
+    echo "  本机浏览器:  http://127.0.0.1:${port}/"
+    if [ -n "$ipv4_address" ] && [ "$ipv4_address" != "127.0.0.1" ]; then
+        echo -e "${gl_hui}  局域网访问 (需防火墙放通 ${port} 端口):${gl_bai}"
+        echo "  http://${ipv4_address}:${port}/"
+    fi
+    echo -e "${gl_hui}  远程服务器访问建议使用 SSH 隧道:${gl_bai}"
+    echo "  ssh -L ${port}:127.0.0.1:${port} <user>@<server>"
+    echo "  然后浏览器打开 http://127.0.0.1:${port}/"
+    [ -n "$token" ] && echo "  带 Token 直连: http://127.0.0.1:${port}/#token=${token}"
 
     echo ""
     echo -e "${gl_kjlan}健康检查:${gl_bai}"
@@ -1554,13 +1569,37 @@ full_install_wizard() {
 
     echo ""
     echo -e "${gl_lv}=======================================${gl_bai}"
-    echo -e "${gl_lv}  OpenClaw 安装完成！${gl_bai}"
+    echo -e "${gl_lv}  OpenClaw 实例 '${OC_INSTANCE}' 安装完成!${gl_bai}"
     echo -e "${gl_lv}=======================================${gl_bai}"
     echo ""
-    echo -e "下一步:"
-    echo -e "  1. 访问 ${gl_kjlan}http://<your-ip>:${port}/${gl_bai}"
-    echo -e "  2. 在 Settings 中粘贴 Token"
-    echo -e "  3. 运行选项4 进入 OpenClaw 容器管理"
+
+    local port="${OC_GATEWAY_PORT:-18789}"
+    local token=""
+    if [ -f "$ENV_FILE" ]; then
+        token=$(grep '^OPENCLAW_GATEWAY_TOKEN=' "$ENV_FILE" | cut -d'=' -f2-)
+    fi
+
+    echo -e "${gl_kjlan}管理 OpenClaw 的方式:${gl_bai}"
+    echo ""
+    echo -e "  ${gl_huang}① 通过脚本菜单管理 (推荐)${gl_bai}"
+    echo -e "     重新运行本脚本, 选择:"
+    echo -e "       ${gl_kjlan}4${gl_bai}  → OpenClaw 容器管理 (启停/日志/换模型/API/机器人/插件/技能/备份/更新)"
+    echo -e "       ${gl_kjlan}3${gl_bai}  → 安装向导 (重新生成配置/重启/onboard)"
+    echo -e "     快捷命令直接进容器管理:"
+    echo "     bash $0 4"
+    echo ""
+    echo -e "  ${gl_huang}② 命令行直接操作容器${gl_bai}"
+    echo "     docker compose -f $COMPOSE_FILE logs -f gateway     # 查看实时日志"
+    echo "     docker compose -f $COMPOSE_FILE restart gateway     # 重启"
+    echo "     docker compose -f $COMPOSE_FILE exec cli openclaw help  # 查看 openclaw 命令帮助"
+    echo ""
+    echo -e "  ${gl_huang}③ WebUI (可选)${gl_bai}"
+    echo -e "     ${gl_hui}仅当你在本机或通过 SSH 隧道访问时使用, 远程服务器无需配置 nginx 反代${gl_bai}"
+    echo "     本机浏览器:  http://127.0.0.1:${port}/"
+    echo "     SSH 隧道:    ssh -L ${port}:127.0.0.1:${port} <user>@<server-ip>"
+    [ -n "$token" ] && echo "     带 Token 直连: http://127.0.0.1:${port}/#token=${token:0:20}..."
+    echo ""
+    echo -e "${gl_huang}Token 已保存在 $ENV_FILE${gl_bai}"
     echo ""
     break_end
 }
