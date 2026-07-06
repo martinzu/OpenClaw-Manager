@@ -22,7 +22,12 @@ gl_zi=$'\033[35m'
 gl_kjlan=$'\033[96m'
 
 # ---------- 全局配置 ----------
-OC_HOME="${OC_HOME:-/home/docker/openclaw}"
+# 多实例根目录
+OC_BASE_DIR="${OC_BASE_DIR:-/home/docker}"
+# 实例名(可多实例: user1/user2 等), 默认 openclaw; 设置后所有路径/容器/卷基于此派生
+OC_INSTANCE="${OC_INSTANCE:-openclaw}"
+# 实例派生路径
+OC_HOME="$OC_BASE_DIR/$OC_INSTANCE"
 OC_CONFIG_DIR="${OC_CONFIG_DIR:-$OC_HOME/config}"
 OC_WORKSPACE_DIR="${OC_WORKSPACE_DIR:-$OC_HOME/workspace}"
 OC_AUTH_DIR="${OC_AUTH_DIR:-$OC_HOME/auth}"
@@ -30,12 +35,14 @@ OC_DATA_DIR="${OC_DATA_DIR:-$OC_HOME/data}"
 OC_BACKUP_DIR="${OC_BACKUP_DIR:-$OC_HOME/backup}"
 COMPOSE_FILE="$OC_HOME/docker-compose.yml"
 ENV_FILE="$OC_HOME/.env"
-OC_CONTAINER="openclaw-gateway"
-OC_CLI_CONTAINER="openclaw-cli"
+# 容器/卷名基于实例名派生, 保证多实例隔离
+OC_CONTAINER="oc-${OC_INSTANCE}-gateway"
+OC_CLI_CONTAINER="oc-${OC_INSTANCE}-cli"
+OC_VOLUME_NAME="${OC_INSTANCE}_openclaw"
 OC_IMAGE_NAME="${OC_IMAGE_NAME:-openclaw:local}"
 OC_GATEWAY_PORT="${OC_GATEWAY_PORT:-18789}"
 OC_GATEWAY_BIND="${OC_GATEWAY_BIND:-lan}"           # lan | loopback
-OC_HOME_VOLUME="${OC_HOME_VOLUME:-}"                # 留空=bind mount，填卷名=命名卷
+OC_HOME_VOLUME="${OC_HOME_VOLUME:-}"                # 留空=bind mount，填卷名=命名卷(默认用 $OC_VOLUME_NAME 并自动处理)
 
 ENABLE_STATS="${ENABLE_STATS:-true}"
 GH_PROXY="${GH_PROXY:-https://gh.kejilion.pro/}"
@@ -148,6 +155,164 @@ ip_address() {
 #  OpenClaw Docker 专用辅助函数
 # ============================================================================
 
+# 切换当前实例: 重新计算所有派生路径/容器名/卷名
+# 用法: oc_set_instance <instance_name>
+oc_set_instance() {
+    OC_INSTANCE="$1"
+    OC_HOME="$OC_BASE_DIR/$OC_INSTANCE"
+    OC_CONFIG_DIR="$OC_HOME/config"
+    OC_WORKSPACE_DIR="$OC_HOME/workspace"
+    OC_AUTH_DIR="$OC_HOME/auth"
+    OC_DATA_DIR="$OC_HOME/data"
+    OC_BACKUP_DIR="$OC_HOME/backup"
+    COMPOSE_FILE="$OC_HOME/docker-compose.yml"
+    ENV_FILE="$OC_HOME/.env"
+    OC_CONTAINER="oc-${OC_INSTANCE}-gateway"
+    OC_CLI_CONTAINER="oc-${OC_INSTANCE}-cli"
+    OC_VOLUME_NAME="${OC_INSTANCE}_openclaw"
+}
+
+# 发现已有实例(扫描 OC_BASE_DIR 下含 docker-compose.yml 的子目录)
+_oc_discover_instances() {
+    _OC_INSTANCES=()
+    if [ -d "$OC_BASE_DIR" ]; then
+        while IFS= read -r d; do
+            [ -z "$d" ] && continue
+            _OC_INSTANCES+=("$(basename "$d")")
+        done < <(find "$OC_BASE_DIR" -maxdepth 2 -name docker-compose.yml -print0 2>/dev/null | xargs -0 -n1 dirname 2>/dev/null | sort -u)
+    fi
+}
+
+# 列出所有实例并让用户选择一个, 返回实例名到 stdout
+oc_pick_instance() {
+    local mode="$1"   # "manage"=管理现有实例(必须存在), "install"=新建(可选新名)
+    _oc_discover_instances
+
+    echo -e "${gl_kjlan}========================================${gl_bai}"
+    echo -e "${gl_kjlan}  OpenClaw 实例列表${gl_bai}"
+    echo -e "${gl_kjlan}========================================${gl_bai}"
+
+    if [ "${#_OC_INSTANCES[@]}" -eq 0 ]; then
+        if [ "$mode" = "manage" ]; then
+            echo -e "${gl_huang}未发现已安装的实例${gl_bai}"
+            echo -e "请先选择 ${gl_kjlan}3. 安装向导${gl_bai} 创建实例"
+            echo "----------------------------------------"
+            read -e -p "按回车键返回..." _
+            return 1
+        fi
+        echo -e "${gl_hui}  (无已有实例)${gl_bai}"
+        echo ""
+        local default_name="openclaw"
+        read -e -p "请输入新实例名 (默认 $default_name): " new_name
+        [ -z "$new_name" ] && new_name="$default_name"
+        # 验证实例名: 只允许小写字母/数字/下划线/短横线
+        if [[ ! "$new_name" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+            echo -e "${gl_hong}实例名只允许字母/数字/下划线/短横线${gl_bai}"
+            return 1
+        fi
+        oc_set_instance "$new_name"
+        echo "$new_name"
+        return 0
+    fi
+
+    local i=1
+    for inst in "${_OC_INSTANCES[@]}"; do
+        local status hdir="$OC_BASE_DIR/$inst"
+        local cnt_name="oc-${inst}-gateway"
+        if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${cnt_name}$"; then
+            status="${gl_lv}● 运行中${gl_bai}"
+        elif docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q "^${cnt_name}$"; then
+            status="${gl_huang}○ 已停止${gl_bai}"
+        elif [ -f "$hdir/docker-compose.yml" ]; then
+            status="${gl_hui}⊘ 未启动${gl_bai}"
+        else
+            status="${gl_hui}?${gl_bai}"
+        fi
+        echo -e "${gl_kjlan}  $i.${gl_bai} ${inst}  [$status  目录: $hdir]"
+        i=$((i+1))
+    done
+    echo "----------------------------------------"
+    if [ "$mode" = "install" ]; then
+        echo -e "${gl_kjlan}  n.${gl_bai} 新建实例"
+    fi
+    echo -e "${gl_kjlan}  0.${gl_bai}  返回"
+    echo "----------------------------------------"
+    read -e -p "请选择实例编号: " pick
+    [ "$pick" = "0" ] && return 1
+
+    if [ "$mode" = "install" ] && { [ "$pick" = "n" ] || [ "$pick" = "N" ] || [ "$pick" = "new" ]; }; then
+        local default_name="openclaw"
+        # 找一个不重名的默认名
+        local try=1 suggested="$default_name"
+        while [ -d "$OC_BASE_DIR/$suggested" ]; do
+            suggested="openclaw${try}"
+            try=$((try+1))
+        done
+        read -e -p "请输入新实例名 (默认 $suggested): " new_name
+        [ -z "$new_name" ] && new_name="$suggested"
+        if [[ ! "$new_name" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+            echo -e "${gl_hong}实例名只允许字母/数字/下划线/短横线${gl_bai}"
+            sleep 2; return 1
+        fi
+        # 检查端口冲突 (如果新实例目录存在同名会覆盖 docker-compose, 但这是安装向导的事)
+        if [ -d "$OC_BASE_DIR/$new_name" ] && [ -f "$OC_BASE_DIR/$new_name/docker-compose.yml" ]; then
+            echo -e "${gl_huang}实例 $new_name 已存在, 将进入该实例的管理上下文${gl_bai}"
+            sleep 1
+        fi
+        oc_set_instance "$new_name"
+        echo "$new_name"
+        return 0
+    fi
+
+    if ! [[ "$pick" =~ ^[0-9]+$ ]] || [ "$pick" -lt 1 ] || [ "$pick" -gt "${#_OC_INSTANCES[@]}" ]; then
+        echo -e "${gl_hong}无效的输入${gl_bai}"
+        sleep 1; return 1
+    fi
+    local chosen="${_OC_INSTANCES[$((pick-1))]}"
+    oc_set_instance "$chosen"
+    echo "$chosen"
+    return 0
+}
+
+# 选择要卸载的实例 (多选/全部支持)
+oc_pick_uninstall_instances() {
+    _oc_discover_instances
+    _OC_UNINST=()
+    if [ "${#_OC_INSTANCES[@]}" -eq 0 ]; then
+        echo -e "${gl_huang}未发现已安装的实例, 无需卸载${gl_bai}"
+        sleep 1
+        return 1
+    fi
+    echo -e "${gl_hong}========================================${gl_bai}"
+    echo -e "${gl_hong}  卸载 OpenClaw 实例${gl_bai}"
+    echo -e "${gl_hong}========================================${gl_bai}"
+    local i=1
+    for inst in "${_OC_INSTANCES[@]}"; do
+        echo -e "${gl_kjlan}  $i.${gl_bai} $inst  ($OC_BASE_DIR/$inst)"
+        i=$((i+1))
+    done
+    echo -e "${gl_kjlan}  a.${gl_bai} 全部卸载"
+    echo -e "${gl_kjlan}  0.${gl_bai} 返回"
+    echo "----------------------------------------"
+    read -e -p "请输入要卸载的编号(多个用空格, a=全部): " pick
+    [ "$pick" = "0" ] && return 1
+    if [ "$pick" = "a" ] || [ "$pick" = "A" ]; then
+        _OC_UNINST=("${_OC_INSTANCES[@]}")
+    else
+        for p in $pick; do
+            if [[ "$p" =~ ^[0-9]+$ ]] && [ "$p" -ge 1 ] && [ "$p" -le "${#_OC_INSTANCES[@]}" ]; then
+                _OC_UNINST+=("${_OC_INSTANCES[$((p-1))]}")
+            fi
+        done
+    fi
+    [ "${#_OC_UNINST[@]}" -eq 0 ] && return 1
+    echo ""
+    echo -e "${gl_huang}将卸载以下实例:${gl_bai} ${_OC_UNINST[*]}"
+    read -e -p "$(echo -e "${gl_hong}确认操作? 将停止并删除容器+卷+数据 (y/N): ${gl_bai}")" confirm
+    [[ ! "$confirm" =~ ^[Yy] ]] && return 1
+    return 0
+}
+
 # 确保 OC_HOME 目录结构存在
 ensure_oc_dirs() {
     mkdir -p "$OC_HOME" "$OC_CONFIG_DIR" "$OC_CONFIG_DIR/workspace" \
@@ -170,7 +335,7 @@ oc_exec() {
         return 1
     fi
     cd "$OC_HOME" || return 1
-    docker compose -f "$COMPOSE_FILE" exec -T "$OC_CLI_CONTAINER" openclaw "$@"
+    docker compose -f "$COMPOSE_FILE" exec -T cli openclaw "$@"
 }
 
 # 在容器内执行 openclaw 命令 (交互式，带 TTY)
@@ -180,7 +345,7 @@ oc_exec_it() {
         return 1
     fi
     cd "$OC_HOME" || return 1
-    docker compose -f "$COMPOSE_FILE" exec "$OC_CLI_CONTAINER" openclaw "$@"
+    docker compose -f "$COMPOSE_FILE" exec cli openclaw "$@"
 }
 
 # 在容器内执行任意命令 (非交互)
@@ -190,7 +355,7 @@ oc_run() {
         return 1
     fi
     cd "$OC_HOME" || return 1
-    docker compose -f "$COMPOSE_FILE" run --rm -T "$OC_CLI_CONTAINER" "$@"
+    docker compose -f "$COMPOSE_FILE" run --rm -T cli "$@"
 }
 
 # 获取 openclaw 配置文件路径 (宿主机路径)
@@ -212,7 +377,7 @@ oc_container_running() {
 oc_compose_defined() {
     [ -f "$COMPOSE_FILE" ] || return 1
     cd "$OC_HOME" || return 1
-    docker compose -f "$COMPOSE_FILE" config --services 2>/dev/null | grep -q "^${OC_CLI_CONTAINER}$"
+    docker compose -f "$COMPOSE_FILE" config --services 2>/dev/null | grep -q "^gateway$"
 }
 
 # 启动网关
@@ -222,7 +387,7 @@ start_gateway() {
         echo -e "${gl_hong}未找到 docker-compose.yml${gl_bai}"
         return 1
     fi
-    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d "$OC_CONTAINER"
+    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d gateway
     sleep 3
 }
 
@@ -814,7 +979,7 @@ _oc_build_image() {
         echo ""
         read -e -p "镜像已更新, 是否重启 OpenClaw 容器以应用新镜像? (Y/n): " restart_choice
         if [[ ! "$restart_choice" =~ ^[Nn] ]]; then
-            cd "$OC_HOME" && docker compose -f "$COMPOSE_FILE" up -d --force-recreate "$OC_CONTAINER"
+            cd "$OC_HOME" && docker compose -f "$COMPOSE_FILE" up -d --force-recreate gateway
             echo -e "${gl_lv}容器已重启${gl_bai}"
         fi
     fi
@@ -895,16 +1060,21 @@ image_build_menu() {
 # ============================================================================
 
 install_wizard_menu() {
+    # 进入安装向导时先选择/新建实例
+    echo ""
+    oc_pick_instance "install" || return 0
+
     while true; do
         clear
         send_stats "OpenClaw安装向导"
         echo "========================================"
-        echo -e "🦞 OpenClaw 安装向导 🦞"
+        echo -e "🦞 OpenClaw 安装向导 🦞  实例: ${gl_lv}${OC_INSTANCE}${gl_bai}"
         echo "========================================"
         echo "安装目录: ${gl_kjlan}$OC_HOME${gl_bai}"
         echo "配置目录: ${gl_kjlan}$OC_CONFIG_DIR${gl_bai}"
         echo "镜像名:   ${gl_kjlan}$OC_IMAGE_NAME${gl_bai}"
         echo "端口:     ${gl_kjlan}$OC_GATEWAY_PORT${gl_bai}"
+        echo "容器名:   ${gl_kjlan}$OC_CONTAINER${gl_bai} / $OC_CLI_CONTAINER"
         echo ""
         echo "Compose 状态:"
         if [ -f "$COMPOSE_FILE" ]; then
@@ -931,6 +1101,7 @@ install_wizard_menu() {
         echo -e "${gl_kjlan}9.${gl_bai} 重新生成配置 (覆盖)"
         echo -e "${gl_kjlan}10.${gl_bai} 配置向导 (onboard)"
         echo -e "${gl_kjlan}11.${gl_bai} 查看访问地址和 Token"
+        echo -e "${gl_kjlan}s.${gl_bai} 切换实例"
         echo "----------------------------------------"
         echo -e "${gl_kjlan}0.${gl_bai} 返回主菜单"
         echo "----------------------------------------"
@@ -940,13 +1111,14 @@ install_wizard_menu() {
             2) generate_compose_file ;;
             3) generate_env_file ;;
             4) start_gateway; break_end ;;
-            5) cd "$OC_HOME" && docker compose -f "$COMPOSE_FILE" stop openclaw-gateway; break_end ;;
-            6) cd "$OC_HOME" && docker compose -f "$COMPOSE_FILE" restart openclaw-gateway; break_end ;;
-            7) cd "$OC_HOME" && docker compose -f "$COMPOSE_FILE" logs -f --tail=100 openclaw-gateway; break_end ;;
-            8) cd "$OC_HOME" && docker compose -f "$COMPOSE_FILE" exec openclaw-gateway /bin/bash; break_end ;;
+            5) cd "$OC_HOME" && docker compose -f "$COMPOSE_FILE" stop gateway; break_end ;;
+            6) cd "$OC_HOME" && docker compose -f "$COMPOSE_FILE" restart gateway; break_end ;;
+            7) cd "$OC_HOME" && docker compose -f "$COMPOSE_FILE" logs -f --tail=100 gateway; break_end ;;
+            8) cd "$OC_HOME" && docker compose -f "$COMPOSE_FILE" exec gateway /bin/bash; break_end ;;
             9) generate_compose_file; generate_env_file; echo -e "${gl_lv}配置已重新生成${gl_bai}"; break_end ;;
             10) run_onboarding ;;
             11) show_access_info; break_end ;;
+            s|S) oc_pick_instance "install" || return 0 ;;
             0) return 0 ;;
             *) echo "无效的输入!"; sleep 1 ;;
         esac
@@ -1019,6 +1191,7 @@ check_prerequisites() {
 }
 
 # 生成 .env 文件
+# 参数: $1 = noninteractive (可选) - 非交互模式, 使用当前全局变量值不询问
 generate_env_file() {
     echo -e "${gl_kjlan}=== 生成 .env 配置 ===${gl_bai}"
 
@@ -1029,14 +1202,21 @@ generate_env_file() {
     local gateway_token
     gateway_token=$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | xxd -p | head -c 64)
 
-    read -e -p "网关端口 (默认 $OC_GATEWAY_PORT): " input_port
-    [ -n "$input_port" ] && OC_GATEWAY_PORT="$input_port"
+    if [ "$1" != "noninteractive" ]; then
+        read -e -p "网关端口 (默认 $OC_GATEWAY_PORT): " input_port
+        [ -n "$input_port" ] && OC_GATEWAY_PORT="$input_port"
 
-    read -e -p "绑定模式 (lan/loopback, 默认 $OC_GATEWAY_BIND): " input_bind
-    [ -n "$input_bind" ] && OC_GATEWAY_BIND="$input_bind"
+        read -e -p "绑定模式 (lan/loopback, 默认 $OC_GATEWAY_BIND): " input_bind
+        [ -n "$input_bind" ] && OC_GATEWAY_BIND="$input_bind"
 
-    read -e -p "是否使用命名卷持久化 /home/node? (留空=bind mount, 输入卷名=openclaw_home): " home_vol
-    OC_HOME_VOLUME="$home_vol"
+        echo ""
+        echo -e "${gl_kjlan}数据持久化方式:${gl_bai}"
+        echo -e "  回车     = bind mount (数据保存在 $OC_HOME/ 下)"
+        echo -e "  输入卷名  = 使用 Docker 命名卷"
+        echo -e "  推荐     = ${OC_VOLUME_NAME} (直接回车跳过 = bind mount)"
+        read -e -p "请输入卷名或回车跳过: " home_vol
+        OC_HOME_VOLUME="$home_vol"
+    fi
 
     cat > "$ENV_FILE" <<EOF
 # OpenClaw Docker 环境配置
@@ -1082,28 +1262,26 @@ generate_compose_file() {
     # 确保目录权限 (uid 1000 = node 用户)
     chown -R 1000:1000 "$OC_CONFIG_DIR" "$OC_WORKSPACE_DIR" "$OC_AUTH_DIR" "$OC_DATA_DIR" 2>/dev/null || true
 
-    # 预先生成 volumes 片段(根据是否使用命名卷)
+    # 卷片段: 命名卷固定用 $OC_VOLUME_NAME (${instance}_openclaw), external:false 让 compose 自动创建
     local gateway_volumes cli_volumes top_volumes
     if [ -n "$OC_HOME_VOLUME" ]; then
-        # 使用命名卷: 必须先 docker volume create, 顶层 volumes 声明 external:false 让 compose 自动创建
-        docker volume create "$OC_HOME_VOLUME" >/dev/null 2>&1 || true
+        local vol_name="${OC_VOLUME_NAME}"
         gateway_volumes="    volumes:
       - \${OPENCLAW_CONFIG_DIR:-${OC_CONFIG_DIR}}:/home/node/.openclaw
       - \${OPENCLAW_WORKSPACE_DIR:-${OC_WORKSPACE_DIR}}:/home/node/.openclaw/workspace
       - \${OPENCLAW_AUTH_PROFILE_SECRET_DIR:-${OC_AUTH_DIR}}:/home/node/.config/openclaw
-      - ${OC_HOME_VOLUME}:/home/node"
+      - ${vol_name}:/home/node"
         cli_volumes="    volumes:
       - \${OPENCLAW_CONFIG_DIR:-${OC_CONFIG_DIR}}:/home/node/.openclaw
       - \${OPENCLAW_WORKSPACE_DIR:-${OC_WORKSPACE_DIR}}:/home/node/.openclaw/workspace
       - \${OPENCLAW_AUTH_PROFILE_SECRET_DIR:-${OC_AUTH_DIR}}:/home/node/.config/openclaw
-      - ${OC_HOME_VOLUME}:/home/node"
+      - ${vol_name}:/home/node"
         top_volumes="
 volumes:
-  ${OC_HOME_VOLUME}:
+  ${vol_name}:
     external: false
 "
     else
-        # bind mount
         gateway_volumes="    volumes:
       - \${OPENCLAW_CONFIG_DIR:-${OC_CONFIG_DIR}}:/home/node/.openclaw
       - \${OPENCLAW_WORKSPACE_DIR:-${OC_WORKSPACE_DIR}}:/home/node/.openclaw/workspace
@@ -1116,24 +1294,34 @@ volumes:
         top_volumes=""
     fi
 
+    # bind 地址转换
+    local bind_addr
+    if [ "$OC_GATEWAY_BIND" = "loopback" ]; then
+        bind_addr="127.0.0.1"
+    else
+        bind_addr="0.0.0.0"
+    fi
+
     cat > "$COMPOSE_FILE" <<EOF
-# OpenClaw Docker Compose
+# OpenClaw Docker Compose (instance: ${OC_INSTANCE})
 # 由 openclaw-docker.sh 生成于 $(date '+%Y-%m-%d %H:%M:%S')
 # 参考: https://docs.openclaw.ai/install/docker
 
+name: oc-${OC_INSTANCE}
+
 services:
-  openclaw-gateway:
+  gateway:
     image: \${OPENCLAW_IMAGE:-${OC_IMAGE_NAME}}
     container_name: ${OC_CONTAINER}
     restart: unless-stopped
     ports:
-      - "\${OPENCLAW_GATEWAY_PORT:-${OC_GATEWAY_PORT}}:18789"
+      - "${bind_addr}:\${OPENCLAW_GATEWAY_PORT:-${OC_GATEWAY_PORT}}:18789"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
       - NODE_ENV=production
       - OPENCLAW_GATEWAY_TOKEN=\${OPENCLAW_GATEWAY_TOKEN}
-      - OPENCLAW_GATEWAY_BIND=\${OPENCLAW_GATEWAY_BIND:-${OC_GATEWAY_BIND}}
+      - OPENCLAW_GATEWAY_BIND=lan
       - OPENCLAW_DISABLE_BONJOUR=\${OPENCLAW_DISABLE_BONJOUR:-1}
 ${gateway_volumes}
     healthcheck:
@@ -1148,11 +1336,14 @@ ${gateway_volumes}
       - NET_RAW
       - NET_ADMIN
 
-  openclaw-cli:
+  cli:
     image: \${OPENCLAW_IMAGE:-${OC_IMAGE_NAME}}
     container_name: ${OC_CLI_CONTAINER}
-    network_mode: "service:${OC_CONTAINER}"
+    network_mode: "service:gateway"
     profiles: ["cli"]
+    entrypoint: ["openclaw"]
+    stdin_open: true
+    tty: true
 ${cli_volumes}
     security_opt:
       - no-new-privileges:true
@@ -1179,11 +1370,11 @@ run_onboarding() {
     echo ""
 
     # 先确保网关容器存在
-    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d "$OC_CONTAINER"
+    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d gateway
     sleep 3
 
     # 运行 onboard (交互式)
-    docker compose -f "$COMPOSE_FILE" exec "$OC_CONTAINER" \
+    docker compose -f "$COMPOSE_FILE" exec gateway \
         node /usr/local/lib/node_modules/openclaw/openclaw.mjs onboard --mode local --no-install-daemon
 
     # onboard 完成后必须重启网关, 否则 channel 配置(飞书/Telegram等)不会生效
@@ -1194,15 +1385,15 @@ run_onboarding() {
     read -e -p "是否立即重启 OpenClaw 容器? (Y/n): " restart_after_onboard
     if [[ ! "$restart_after_onboard" =~ ^[Nn] ]]; then
         echo -e "${gl_kjlan}正在重启容器...${gl_bai}"
-        docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" restart "$OC_CONTAINER"
+        docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" restart gateway
         echo -e "${gl_lv}容器已重启${gl_bai}"
         echo -e "${gl_kjlan}等待 5 秒后显示最近日志...${gl_bai}"
         sleep 5
         echo ""
         echo -e "${gl_kjlan}=== 最近 30 行日志 ===${gl_bai}"
-        docker compose -f "$COMPOSE_FILE" logs --tail=30 "$OC_CONTAINER"
+        docker compose -f "$COMPOSE_FILE" logs --tail=30 gateway
         echo ""
-        echo -e "${gl_huang}如需查看实时日志: docker compose -f $COMPOSE_FILE logs -f $OC_CONTAINER${gl_bai}"
+        echo -e "${gl_huang}如需查看实时日志: docker compose -f $COMPOSE_FILE logs -f gateway${gl_bai}"
     fi
     break_end
 }
@@ -1259,8 +1450,10 @@ show_access_info() {
 # 完整安装向导
 full_install_wizard() {
     echo "========================================"
-    echo -e "🦞 OpenClaw 完整安装向导 🦞"
+    echo -e "🦞 OpenClaw 完整安装向导 🦞  实例: ${gl_lv}${OC_INSTANCE}${gl_bai}"
     echo "========================================"
+    echo -e "${gl_kjlan}安装路径:${gl_bai}  $OC_HOME"
+    echo -e "${gl_kjlan}容器名:${gl_bai}    $OC_CONTAINER / $OC_CLI_CONTAINER"
     echo ""
 
     # 1. 前置检查
@@ -1272,8 +1465,35 @@ full_install_wizard() {
 
     echo ""
 
-    # 2. 生成配置
-    generate_env_file
+    # 端口冲突检测
+    local default_port="${OC_GATEWAY_PORT:-18789}"
+    if ss -tlnp 2>/dev/null | grep -q ":${default_port} " || netstat -tlnp 2>/dev/null | grep -q ":${default_port} "; then
+        echo -e "${gl_huang}⚠ 端口 ${default_port} 已被占用${gl_bai}"
+        read -e -p "请输入新的网关端口 (直接回车退出): " alt_port
+        if [ -z "$alt_port" ]; then
+            echo -e "${gl_hong}安装中止${gl_bai}"
+            break_end; return 1
+        fi
+        OC_GATEWAY_PORT="$alt_port"
+    fi
+
+    # 是否使用命名卷持久化 /home/node
+    echo ""
+    echo -e "${gl_kjlan}数据持久化方式:${gl_bai}"
+    echo -e "  ${gl_kjlan}1.${gl_bai} Bind mount (默认) - 数据保存在 $OC_HOME/ 目录下, 直接可见"
+    echo -e "  ${gl_kjlan}2.${gl_bai} 命名卷 - 使用 Docker volume (${OC_VOLUME_NAME}), 便于迁移备份"
+    read -e -p "请选择 (1/2, 默认 1): " vol_choice
+    if [ "$vol_choice" = "2" ]; then
+        OC_HOME_VOLUME="$OC_VOLUME_NAME"
+        echo -e "${gl_lv}将使用命名卷: $OC_VOLUME_NAME${gl_bai}"
+    else
+        OC_HOME_VOLUME=""
+        echo -e "${gl_lv}将使用 bind mount${gl_bai}"
+    fi
+    echo ""
+
+    # 2. 生成配置 (noninteractive: 已在向导头部询问过端口/绑定/卷, 不再重复)
+    generate_env_file noninteractive
     echo ""
     generate_compose_file
     echo ""
@@ -1291,7 +1511,7 @@ full_install_wizard() {
     echo ""
 
     echo -e "${gl_kjlan}=== 启动 OpenClaw 容器 ===${gl_bai}"
-    if docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d "$OC_CONTAINER"; then
+    if docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d gateway; then
         echo -e "${gl_lv}容器已启动${gl_bai}"
         sleep 5
     else
@@ -1347,7 +1567,7 @@ full_install_wizard() {
 
 # ============================================================================
 #  选项 4: OpenClaw 容器管理 (全量搬运 kejilion.sh moltbot_menu)
-#  适配: openclaw xxx → docker compose exec openclaw-cli openclaw xxx
+#  适配: openclaw xxx → docker compose exec cli openclaw xxx
 #        ${HOME}/.openclaw/openclaw.json → $OC_CONFIG_DIR/openclaw.json (宿主机直接读写)
 # ============================================================================
 
@@ -1411,7 +1631,7 @@ start_bot() {
 stop_bot() {
     echo -e "${gl_kjlan}停止 OpenClaw 容器...${gl_bai}"
     send_stats "停止 OpenClaw"
-    cd "$OC_HOME" && docker compose -f "$COMPOSE_FILE" stop openclaw-gateway
+    cd "$OC_HOME" && docker compose -f "$COMPOSE_FILE" stop gateway
     break_end
 }
 
@@ -1419,7 +1639,7 @@ stop_bot() {
 restart_bot() {
     echo -e "${gl_kjlan}重启 OpenClaw 容器...${gl_bai}"
     send_stats "重启 OpenClaw"
-    cd "$OC_HOME" && docker compose -f "$COMPOSE_FILE" restart openclaw-gateway
+    cd "$OC_HOME" && docker compose -f "$COMPOSE_FILE" restart gateway
     sleep 3
     break_end
 }
@@ -1440,7 +1660,7 @@ view_logs() {
     oc_exec gateway status 2>&1 | head -30
     echo ""
     echo -e "${gl_kjlan}=== 最近日志 (Ctrl+C 退出) ===${gl_bai}"
-    docker compose -f "$COMPOSE_FILE" logs --tail=100 -f openclaw-gateway
+    docker compose -f "$COMPOSE_FILE" logs --tail=100 -f gateway
     break_end
 }
 
@@ -1455,10 +1675,10 @@ update_moltbot() {
     fi
     cd "$OC_HOME" || return 1
     echo -e "${gl_kjlan}1. 拉取最新镜像...${gl_bai}"
-    docker compose -f "$COMPOSE_FILE" pull openclaw-gateway 2>/dev/null || \
+    docker compose -f "$COMPOSE_FILE" pull gateway 2>/dev/null || \
         echo -e "${gl_huang}本地构建镜像请用选项2 更新镜像${gl_bai}"
     echo -e "${gl_kjlan}2. 重建容器...${gl_bai}"
-    docker compose -f "$COMPOSE_FILE" up -d --force-recreate openclaw-gateway
+    docker compose -f "$COMPOSE_FILE" up -d --force-recreate gateway
     sleep 3
     echo -e "${gl_lv}更新完成${gl_bai}"
     break_end
@@ -1466,29 +1686,67 @@ update_moltbot() {
 
 # 卸载 OpenClaw 容器
 uninstall_moltbot() {
-    echo -e "${gl_hong}卸载 OpenClaw...${gl_bai}"
+    echo -e "${gl_hong}卸载 OpenClaw${gl_bai}"
     send_stats "卸载 OpenClaw"
-    if [ ! -f "$COMPOSE_FILE" ]; then
-        echo -e "${gl_huang}未找到 compose 配置，无需卸载${gl_bai}"
-        break_end
-        return 0
-    fi
-    read -e -p "$(echo -e "${gl_hong}确认卸载? 将停止并删除容器 (Y/N): ${gl_bai}")" choice
-    case "$choice" in
-        [Yy])
-            cd "$OC_HOME" || return 1
-            docker compose -f "$COMPOSE_FILE" down -v 2>/dev/null
-            echo -e "${gl_kjlan}是否删除配置和数据目录? $OC_HOME${gl_bai}"
-            read -e -p "(y/N): " del_data
+    # 多实例选择
+    oc_pick_uninstall_instances || return 0
+
+    local any_err=0
+    local saved_instance="$OC_INSTANCE"
+    for inst in "${_OC_UNINST[@]}"; do
+        oc_set_instance "$inst"
+        echo ""
+        echo -e "${gl_kjlan}===== 卸载实例: ${gl_huang}${inst}${gl_kjlan} =====${gl_bai}"
+        echo -e "${gl_kjlan}目录: $OC_HOME${gl_bai}"
+        echo -e "${gl_kjlan}容器: $OC_CONTAINER / $OC_CLI_CONTAINER${gl_bai}"
+        echo -e "${gl_kjlan}命名卷: ${OC_VOLUME_NAME}${gl_bai}"
+        echo ""
+
+        # 1. 停止并通过 compose down -v 删除容器+compose 定义的卷
+        if [ -f "$COMPOSE_FILE" ]; then
+            cd "$OC_HOME" || continue
+            echo -e "${gl_kjlan}停止容器并移除 compose 资源...${gl_bai}"
+            docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" down -v --remove-orphans 2>/dev/null
+        fi
+
+        # 2. 兜底: 按容器名删除可能残留的容器(兼容旧版本/异常状态)
+        for cname in "$OC_CONTAINER" "$OC_CLI_CONTAINER"; do
+            if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q "^${cname}$"; then
+                echo -e "${gl_kjlan}删除残留容器 $cname${gl_bai}"
+                docker rm -f "$cname" >/dev/null 2>&1
+            fi
+        done
+
+        # 3. 兜底: 删除命名卷(可能被 external 标记过, down -v 没删到)
+        if docker volume ls -q 2>/dev/null | grep -q "^${OC_VOLUME_NAME}$"; then
+            echo -e "${gl_kjlan}删除命名卷 ${OC_VOLUME_NAME}${gl_bai}"
+            docker volume rm -f "${OC_VOLUME_NAME}" >/dev/null 2>&1
+        fi
+
+        # 4. 询问是否删除数据目录
+        echo ""
+        if [ -d "$OC_HOME" ]; then
+            read -e -p "$(echo -e "${gl_huang}是否删除数据目录 $OC_HOME ? (y/N): ${gl_bai}")" del_data
             if [[ "$del_data" =~ ^[Yy] ]]; then
                 rm -rf "$OC_HOME"
-                echo -e "${gl_lv}已删除: $OC_HOME${gl_bai}"
+                echo -e "${gl_lv}已删除目录: $OC_HOME${gl_bai}"
+                # 如果是最后一个实例且父目录为空, 提示
+                if [ -d "$OC_BASE_DIR" ] && [ -z "$(ls -A "$OC_BASE_DIR" 2>/dev/null)" ]; then
+                    echo -e "${gl_hui}(实例根目录 $OC_BASE_DIR 已为空, 未自动删除)${gl_bai}"
+                fi
             else
-                echo -e "${gl_huang}已保留配置: $OC_HOME${gl_bai}"
+                echo -e "${gl_huang}已保留目录: $OC_HOME${gl_bai}"
             fi
-            echo -e "${gl_lv}卸载完成${gl_bai}"
-            ;;
-    esac
+        fi
+        echo -e "${gl_lv}实例 $inst 卸载完成${gl_bai}"
+    done
+
+    # 恢复原来的实例上下文
+    oc_set_instance "$saved_instance" 2>/dev/null
+    echo ""
+    echo -e "${gl_lv}========================================${gl_bai}"
+    echo -e "${gl_lv}  所选实例已卸载${gl_bai}"
+    echo -e "${gl_lv}========================================${gl_bai}"
     break_end
 }
 
@@ -2244,7 +2502,7 @@ openclaw_memory_backup_import() {
     openclaw_backup_render_file_list
     read -e -p "请输入备份文件名 (不含路径): " bak_file
     if [ -f "$OC_BACKUP_DIR/$bak_file" ]; then
-        cd "$OC_HOME" && docker compose -f "$COMPOSE_FILE" stop openclaw-gateway
+        cd "$OC_HOME" && docker compose -f "$COMPOSE_FILE" stop gateway
         tar -xzf "$OC_BACKUP_DIR/$bak_file" -C "$OC_CONFIG_DIR"
         chown -R 1000:1000 "$OC_CONFIG_DIR" 2>/dev/null
         start_gateway
@@ -2357,11 +2615,11 @@ change_tg_bot_code() {
                 echo ""
                 read -e -p "飞书配置已完成, 是否立即重启容器让配置生效? (Y/n): " restart_feishu
                 if [[ ! "$restart_feishu" =~ ^[Nn] ]]; then
-                    cd "$OC_HOME" && docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" restart "$OC_CONTAINER"
+                    cd "$OC_HOME" && docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" restart gateway
                     echo -e "${gl_lv}容器已重启, 飞书 channel 即将生效${gl_bai}"
                     echo -e "${gl_kjlan}5 秒后显示最近日志:${gl_bai}"
                     sleep 5
-                    docker compose -f "$COMPOSE_FILE" logs --tail=30 "$OC_CONTAINER"
+                    docker compose -f "$COMPOSE_FILE" logs --tail=30 gateway
                 fi
             fi
             ;;
@@ -2375,6 +2633,9 @@ change_tg_bot_code() {
 # ----------------------------------------------------------------------------
 
 openclaw_container_menu() {
+    # 进入容器管理时必须选择已有实例
+    echo ""
+    oc_pick_instance "manage" || return 0
     oc_check_deployed || return 0
     while true; do
         clear
@@ -2384,7 +2645,7 @@ openclaw_container_menu() {
         update_message=$(check_openclaw_update 2>/dev/null)
 
         echo "========================================"
-        echo -e "🦞 OPENCLAW 容器管理 (Docker) 🦞"
+        echo -e "🦞 OPENCLAW 容器管理 (Docker) 🦞  实例: ${gl_lv}${OC_INSTANCE}${gl_bai}"
         echo "========================================"
         echo -e "$install_status $running_status $update_message"
         echo "========================================"
@@ -2409,7 +2670,8 @@ openclaw_container_menu() {
         echo "19. 更新 (拉取最新镜像)"
         echo "20. 卸载 (停止并删除容器)"
         echo "----------------------------------------"
-        echo "0. 返回主菜单"
+        echo -e "${gl_kjlan}s.${gl_bai}  切换实例"
+        echo -e "${gl_kjlan}0.${gl_bai}  返回主菜单"
         echo "----------------------------------------"
         read -e -p "请输入你的选择: " choice
         case $choice in
@@ -2445,6 +2707,10 @@ openclaw_container_menu() {
             18) openclaw_backup_restore_menu ;;
             19) update_moltbot ;;
             20) uninstall_moltbot ;;
+            s|S)
+                oc_pick_instance "manage" || continue
+                oc_check_deployed || continue
+                ;;
             0) break ;;
             *) echo "无效的输入!"; sleep 1 ;;
         esac
@@ -2471,6 +2737,14 @@ LOGO
         echo "========================================"
         echo -e "  OpenClaw Docker 管理脚本 v${sh_v}"
         echo "========================================"
+        # 发现并显示实例状态
+        _oc_discover_instances
+        local inst_count="${#_OC_INSTANCES[@]}"
+        if [ "$inst_count" -gt 0 ]; then
+            echo -e "${gl_lv}已发现 ${inst_count} 个实例:${gl_bai} ${_OC_INSTANCES[*]}"
+        else
+            echo -e "${gl_huang}未发现已安装实例, 请先运行选项3 安装向导${gl_bai}"
+        fi
         echo ""
         echo -e "${gl_kjlan}脚本向导选项:${gl_bai}"
         echo "----------------------------------------"
